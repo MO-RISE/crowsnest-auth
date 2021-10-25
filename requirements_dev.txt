@@ -1,3 +1,5 @@
 black
 pylint
 pytest
+pytest-docker
+pytest-dotenv

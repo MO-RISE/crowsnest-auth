@@ -1,7 +1,7 @@
 from sqlalchemy import Column, BigInteger, String
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.sql.expression import null
+from databases.backends.postgres import Record
 
 Base = declarative_base()
 
@@ -14,5 +14,12 @@ class User(Base):
     path_whitelist = Column(ARRAY(String(255), dimensions=1))
     path_blacklist = Column(ARRAY(String(255), dimensions=1))
     topic_whitelist = Column(ARRAY(String(255), dimensions=1))
-    topic_whitelist = Column(ARRAY(String(255), dimensions=1))
-    tokens = Column(ARRAY)
+    topic_blacklist = Column(ARRAY(String(255), dimensions=1))
+    llt_id = Column(String(255))
+
+    @classmethod
+    def from_record(cls, record: Record):
+        return cls(**dict(record))
+
+
+users = User.__table__

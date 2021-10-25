@@ -2,7 +2,9 @@ uvicorn
 fastapi
 pydantic
 python-multipart
+environs
 passlib[bcrypt]
 python-jose[cryptography]
 databases[postgresql]
 sqlalchemy
+psycopg2-binary
