@@ -1,12 +1,10 @@
+"""Crow's Nest Auth microservice"""
 import os
 import logging
-import regex as re
 from uuid import UUID, uuid4
-from typing import Dict, List
-from uuid import UUID, uuid4
+from typing import Dict
 from datetime import datetime, timedelta
-from sqlalchemy.sql.functions import user
-
+import regex as re
 
 import uvicorn
 from fastapi import FastAPI, Depends, Request, HTTPException
@@ -19,6 +17,7 @@ from environs import Env
 from databases import Database
 from sqlalchemy import create_engine
 
+# pylint: disable=import-error
 from .models import users, User, Base
 from .oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
 
@@ -57,6 +56,8 @@ database = Database(USER_DATABASE_URL)
 
 @app.on_event("startup")
 async def startup():
+    """Run during startup of this application"""
+
     # Database initial setup using sqlalchemy
     Base.metadata.create_all(create_engine(USER_DATABASE_URL))
 
@@ -85,10 +86,21 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    """Run during shutdown of this application"""
     await database.disconnect()
 
 
-def create_jwt_token(user: User, exp: timedelta = None, llt_id: UUID = None):
+def create_jwt_token(user: User, exp: timedelta = None, llt_id: UUID = None) -> str:
+    """Generate a JWT token string from a User instance
+
+    Args:
+        user (User): The User instance to use as a basis
+        exp (timedelta, optional): Validity time. Defaults to None.
+        llt_id (UUID, optional): A unique id for a token. Defaults to None.
+
+    Returns:
+        str: A Json Web Token
+    """
     claims = {
         "sub": str(user.id),
         "iat": (now := datetime.utcnow()),
@@ -119,6 +131,8 @@ def create_jwt_token(user: User, exp: timedelta = None, llt_id: UUID = None):
 
 @app.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Login a user"""
+
     username: str = form_data.username
     password: str = form_data.password
 
@@ -148,21 +162,32 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     return response
 
 
-async def get_claims(token: str = Depends(oauth2_scheme)):
+async def get_claims(token: str = Depends(oauth2_scheme)) -> Dict:
+    """Decode claims from a token"""
+    # pylint: disable=raise-missing-from
     try:
         return jwt.decode(token, JWT_TOKEN_SECRET, algorithms=["HS256"])
-    except JWTError as exc:
-        LOGGER.exception(str(exc))
-        raise HTTPException(401, "Invalid signature")
     except ExpiredSignatureError as exc:
         LOGGER.exception(str(exc))
         raise HTTPException(401, "Expired signature")
     except JWTClaimsError as exc:
         LOGGER.exception(str(exc))
         raise HTTPException(400, "Invalid claims")
+    except JWTError as exc:
+        LOGGER.exception(str(exc))
+        raise HTTPException(401, "Invalid signature")
 
 
 async def get_user_from_claims(claims: Dict) -> User:
+    """Fetch the User from the user database using the information provided in
+    the decoded claims from a JWT token
+
+    Args:
+        claims (Dict): The claims as decoded from a JWT token
+
+    Returns:
+        User: A user instance
+    """
     user_id = claims.get("sub")
     query = users.select().where(User.id == int(user_id))
     return User.from_record(await database.fetch_one(query))
@@ -170,12 +195,18 @@ async def get_user_from_claims(claims: Dict) -> User:
 
 @app.get("/verify")
 async def verify(request: Request, claims: Dict = Depends(get_claims)):
+    """Authenticate and authorize a request
+
+    Expects the following headers to be populated:
+    - X-Forwarded-Host
+    - X-Forwarded-Uri
+    """
     host = request.headers.get("X-Forwarded-Host")
     uri = request.headers.get("X-Forwarded-Uri")
 
     if not host or not uri:
         msg = "Missing required X-Forwarded-Headers"
-        LOGGER.error(f"{msg}\n{request.client}\n{request.headers}")
+        LOGGER.error("%s\n%s\n%s", msg, request.client, request.headers)
         raise HTTPException(400, msg)
 
     # Hit database for long-lived tokens
@@ -183,7 +214,7 @@ async def verify(request: Request, claims: Dict = Depends(get_claims)):
         user = await get_user_from_claims(claims)
         if user.llt_id != llt_id:
             msg = "Long life token is not valid!"
-            LOGGER.error(f"{msg}\n{request.client}\n{request.headers}")
+            LOGGER.error("%s\n%s\n%s", msg, request.client, request.headers)
             raise HTTPException(403, msg)
 
     # ACL checks
@@ -210,24 +241,29 @@ async def verify(request: Request, claims: Dict = Depends(get_claims)):
 
 
 @app.get("/verify_emqx")
-async def verify_emqx(claims: Dict = Depends(get_claims)):
+async def verify_emqx(  # pylint: disable=unused-argument, missing-function-docstring
+    claims: Dict = Depends(get_claims),
+):
+    # pylint: disable=fixme
     # TODO: Needs a nice way of pattern matching towards mqtt topic wildcard syntax
     pass
 
 
 # Long-lived tokens
 @app.get("/token")
-async def get_token(claims: Dict = Depends(get_claims)) -> List[str]:
+async def get_token(claims: Dict = Depends(get_claims)) -> str:
+    """Get the long-life-token of this user"""
     user = await get_user_from_claims(claims)
 
     if not user.llt_id:
-        raise HTTPException(404)
+        raise HTTPException(404, "No long-life-token available!")
 
     return user.llt_id
 
 
 @app.post("/token")
-async def create_token(claims: Dict = Depends(get_claims)):
+async def create_token(claims: Dict = Depends(get_claims)) -> Dict:
+    """Generate a new long-life-token"""
     user = await get_user_from_claims(claims)
 
     llt_id = uuid4()
@@ -241,6 +277,7 @@ async def create_token(claims: Dict = Depends(get_claims)):
 
 @app.delete("/token")
 async def delete_token(claims: Dict = Depends(get_claims)):
+    """Delete the long-life-token of this user"""
     user = await get_user_from_claims(claims)
 
     query = users.update().where(User.id == user.id).values(llt_id=None)

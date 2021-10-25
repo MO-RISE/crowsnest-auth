@@ -1,3 +1,4 @@
+"""OAuth2 implementation for using either a Bearer token or a cookie"""
 from typing import Dict, Optional
 
 from fastapi.exceptions import HTTPException
@@ -8,8 +9,18 @@ from starlette.requests import Request
 from starlette.status import HTTP_401_UNAUTHORIZED
 
 
-class OAuth2PasswordBearerOrCookie(OAuth2):
-    def __init__(
+class OAuth2PasswordBearerOrCookie(OAuth2):  # pylint: disable=too-few-public-methods
+    """An Oauth2 implemtnation for FastAPI allowing to use either a
+    bearer token or a cookie for carrying the token
+
+    All config same as for Oauth2 (parent class) except for:
+
+    Args:
+        cookie_name (str): The name of the cookie to access
+
+    """
+
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         tokenUrl: str,
         cookie_name: str,
@@ -42,6 +53,6 @@ class OAuth2PasswordBearerOrCookie(OAuth2):
                     status_code=HTTP_401_UNAUTHORIZED,
                     detail="Not authenticated",
                 )
-            else:
-                return None
+
+            return None
         return token
