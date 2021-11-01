@@ -31,7 +31,7 @@ def compose(docker_ip, docker_services):
 
     uris = {
         "postgres": f"postgresql://test:test@{docker_ip}:{docker_services.port_for('postgres', 5432)}/test",
-        "crowsnest-auth": f"http://{docker_ip}:7000/auth",
+        "auth": f"http://{docker_ip}:7000/auth",
         "whoami": f"http://{docker_ip}:7000/whoami",
     }
 

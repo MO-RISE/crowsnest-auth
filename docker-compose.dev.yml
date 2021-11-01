@@ -18,18 +18,19 @@ services:
   crowsnest-auth:
     build: .
     labels:
-      - "traefik.enable=true"
+      - traefik.enable=true
       - traefik.http.routers.crowsnest-auth.rule=PathPrefix(`/auth`)
-      - traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth"
+      - traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth
       - traefik.http.routers.crowsnest-auth.middlewares=auth-strip
       - traefik.http.middlewares.crowsnest-auth.forwardauth.address=http://crowsnest-auth/verify
       - traefik.http.middlewares.crowsnest-auth.forwardauth.trustForwardHeader=true
     ports:
       - 7002:80
     environment:
-      - USER_DATABASE_URL=postgresql://test:test@postgres:5432/test
+      - USER_DATABASE_URL=postgresql://test:test@postgres/test
     depends_on:
       - postgres
+    restart: unless-stopped
 
   emqx:
     image: emqx/emqx
