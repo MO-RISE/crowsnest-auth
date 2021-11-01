@@ -20,6 +20,7 @@ from sqlalchemy import create_engine
 # pylint: disable=import-error
 from .models import users, User, Base
 from .oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
+from .utils import mqtt_match
 
 LOGGER = logging.getLogger(__name__)
 
@@ -241,12 +242,42 @@ async def verify(request: Request, claims: Dict = Depends(get_claims)):
 
 
 @app.get("/verify_emqx")
-async def verify_emqx(  # pylint: disable=unused-argument, missing-function-docstring
-    claims: Dict = Depends(get_claims),
+async def verify_emqx(
+    client: str,
+    topic: str,
+    token: str,
 ):
-    # pylint: disable=fixme
-    # TODO: Needs a nice way of pattern matching towards mqtt topic wildcard syntax
-    pass
+    claims = await get_claims(token)
+
+    # Hit database for long-lived tokens
+    if llt_id := claims.get("llt_id"):
+        user = await get_user_from_claims(claims)
+        if user.llt_id != llt_id:
+            msg = "Long life token is not valid!"
+            LOGGER.error("%s\n%s", msg, client)
+            raise HTTPException(403, msg)
+
+    # ACL checks
+    if patterns := claims.get("topic_whitelist"):
+        accepted = False
+        for pattern in patterns:
+            if mqtt_match(pattern, topic):
+                accepted = True
+
+        if not accepted:
+            raise HTTPException(403, f"Access is not allowed to {topic}")
+
+    if patterns := claims.get("topic_blacklist"):
+        accepted = True
+        for pattern in patterns:
+            if mqtt_match(pattern, topic):
+                accepted = False
+
+        if not accepted:
+            raise HTTPException(403, f"Access is not allowed to {topic}")
+
+    # Accepted!
+    return JSONResponse("Access allowed!")
 
 
 # Long-lived tokens

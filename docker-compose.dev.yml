@@ -1,5 +1,19 @@
 version: '3'
 services:
+
+  emqx:
+    image: emqx/emqx
+    ports:
+      - 1883:1883
+      - 8083:8083
+      - 8001:18083
+    environment:
+      - EMQX_NAME=test
+      - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard,emqx_auth_http"
+      - EMQX_AUTH__HTTP__ACL_REQ=http://localhost:8000/verify_emqx
+      - EMQX_AUTH__HTTP__ACL_REQ__METHOD=get
+      - EMQX_AUTH__HTTP__ACL_REQ__PARAMS="client=%c,topic=%t,token=%P"
+
   postgres:
     image: "postgres"
     ports:

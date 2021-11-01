@@ -107,3 +107,40 @@ def test_verify_path_blacklist(pgdb, set_admin_user_fields):
             headers={"X-Forwarded-Host": "test", "X-Forwarded-Uri": "/test"},
         )
         assert response.status_code == 403, response.text
+
+
+def test_verify_emqx(pgdb):
+    with TestClient(app) as tc:
+        response = tc.post("/login", {"username": "admin", "password": "admin"})
+        assert response.status_code == 200, response.text
+
+        token = response.cookies["crowsnest-auth-access"]
+
+        response = tc.get(
+            "/verify_emqx",
+            params={
+                "client": "muppet",
+                "topic": "any/trial/topic",
+                "token": token,
+            },
+        )
+        assert response.status_code == 200
+
+
+def test_verify_emqx_topic_whitelist(pgdb, set_admin_user_fields):
+    set_admin_user_fields(topic_whitelist=["any/+/topic/#"])
+    with TestClient(app) as tc:
+        response = tc.post("/login", {"username": "admin", "password": "admin"})
+        assert response.status_code == 200, response.text
+
+        token = response.cookies["crowsnest-auth-access"]
+
+        response = tc.get(
+            "/verify_emqx",
+            params={
+                "client": "muppet",
+                "topic": "any/trial/topic",
+                "token": token,
+            },
+        )
+        assert response.status_code == 200, response.text

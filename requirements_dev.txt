@@ -3,3 +3,4 @@ pylint
 pytest
 pytest-docker
 pytest-dotenv
+paho-mqtt
