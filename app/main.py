@@ -1,13 +1,11 @@
 """Crow's Nest Auth microservice"""
 import os
 import logging
-from uuid import UUID, uuid4
 from typing import Dict
 from datetime import datetime, timedelta
-import regex as re
+import re
 
-import uvicorn
-from fastapi import FastAPI, Depends, Request, HTTPException
+from fastapi import FastAPI, Depends, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
@@ -30,7 +28,7 @@ env = Env()
 ACCESS_COOKIE_DOMAIN = env("COOKIE_DOMAIN", None)
 ACCESS_COOKIE_NAME = env("ACCESS_COOKIE_NAME", "crowsnest-auth-access")
 ACCESS_COOKIE_SECURE = env.bool("ACCESS_COOKIE_SECURE", False)
-ACCESS_COOKIE_HTTPONLY = env.bool("ACCESS_COOKIE_HTTPONLY", False)
+ACCESS_COOKIE_HTTPONLY = env.bool("ACCESS_COOKIE_HTTPONLY", True)
 ACCESS_COOKIE_SAMESITE = env(
     "ACCESS_COOKIE_SAMESITE", "lax", validate=lambda s: s in ["lax", "strict", "none"]
 )
@@ -91,13 +89,15 @@ async def shutdown():
     await database.disconnect()
 
 
-def create_jwt_token(user: User, exp: timedelta = None, llt_id: UUID = None) -> str:
+## JWY utility functions ##
+
+
+def create_jwt_token(user: User, exp: timedelta = None) -> str:
     """Generate a JWT token string from a User instance
 
     Args:
         user (User): The User instance to use as a basis
         exp (timedelta, optional): Validity time. Defaults to None.
-        llt_id (UUID, optional): A unique id for a token. Defaults to None.
 
     Returns:
         str: A Json Web Token
@@ -110,13 +110,6 @@ def create_jwt_token(user: User, exp: timedelta = None, llt_id: UUID = None) -> 
     if exp:
         claims.update({"exp": now + exp})
 
-    if llt_id:
-        claims.update(
-            {
-                "llt_id": str(llt_id),
-            }
-        )
-
     # Add path whitelist/blacklist and topic whitelist/blacklist
     if user.path_whitelist:
         claims.update({"path_whitelist": user.path_whitelist})
@@ -128,39 +121,6 @@ def create_jwt_token(user: User, exp: timedelta = None, llt_id: UUID = None) -> 
         claims.update({"topic_blacklist": user.topic_blacklist})
 
     return jwt.encode(claims, JWT_TOKEN_SECRET, algorithm="HS256")
-
-
-@app.post("/login")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    """Login a user"""
-
-    username: str = form_data.username
-    password: str = form_data.password
-
-    # Query database
-    query = users.select().where(User.username == username)
-    user = User.from_record(await database.fetch_one(query))
-
-    # Compare credentials
-    if not pwd_context.verify(password, user.hashed_password):
-        raise HTTPException(401, "Could not validate credentials")
-
-    # Create token
-    jwt_token: str = create_jwt_token(
-        user, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-
-    # Create response with cookie and return
-    response = JSONResponse("Login successful!")
-    response.set_cookie(
-        key=ACCESS_COOKIE_NAME,
-        value=jwt_token,
-        secure=ACCESS_COOKIE_SECURE,
-        httponly=ACCESS_COOKIE_HTTPONLY,
-        samesite=ACCESS_COOKIE_SAMESITE,
-        domain=ACCESS_COOKIE_DOMAIN,
-    )
-    return response
 
 
 async def get_claims(token: str = Depends(oauth2_scheme)) -> Dict:
@@ -194,14 +154,66 @@ async def get_user_from_claims(claims: Dict) -> User:
     return User.from_record(await database.fetch_one(query))
 
 
+## Routes ##
+
+
+@app.post("/login")
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Login a user"""
+
+    username: str = form_data.username
+    password: str = form_data.password
+
+    # Query database
+    query = users.select().where(User.username == username)
+    user = User.from_record(await database.fetch_one(query))
+
+    # Compare credentials
+    if not pwd_context.verify(password, user.hashed_password):
+        raise HTTPException(401, "Could not validate credentials")
+
+    # Create token
+    jwt_token: str = create_jwt_token(
+        user, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+
+    # Create response with cookie and return
+    response = JSONResponse({"token": jwt_token})
+    response.set_cookie(
+        key=ACCESS_COOKIE_NAME,
+        value=jwt_token,
+        secure=ACCESS_COOKIE_SECURE,
+        httponly=ACCESS_COOKIE_HTTPONLY,
+        samesite=ACCESS_COOKIE_SAMESITE,
+        domain=ACCESS_COOKIE_DOMAIN,
+    )
+    return response
+
+
+@app.post("/logout")
+async def logout(response: Response, _: Dict = Depends(get_claims)):
+    """Logout user
+
+    Args:
+        response (Response): The response objet
+        _ (Dict, optional): To authenticate the user. Defaults to get_claims.
+    """
+    response.delete_cookie(ACCESS_COOKIE_NAME)
+    return response
+
+
 @app.get("/verify")
-async def verify(request: Request, claims: Dict = Depends(get_claims)):
-    """Authenticate and authorize a request
+async def verify(request: Request, token: str = Depends(oauth2_scheme)):
+    """Authenticate and authorize a request according to Traefik ForwardAuth scheme
 
     Expects the following headers to be populated:
     - X-Forwarded-Host
     - X-Forwarded-Uri
     """
+
+    # Decode token (this is what authentcates the request!)
+    claims = await get_claims(token)
+
     host = request.headers.get("X-Forwarded-Host")
     uri = request.headers.get("X-Forwarded-Uri")
 
@@ -211,9 +223,9 @@ async def verify(request: Request, claims: Dict = Depends(get_claims)):
         raise HTTPException(400, msg)
 
     # Hit database for long-lived tokens
-    if llt_id := claims.get("llt_id"):
+    if claims.get("exp") is None:
         user = await get_user_from_claims(claims)
-        if user.llt_id != llt_id:
+        if user.token != token:
             msg = "Long life token is not valid!"
             LOGGER.error("%s\n%s\n%s", msg, request.client, request.headers)
             raise HTTPException(403, msg)
@@ -247,12 +259,13 @@ async def verify_emqx(
     topic: str,
     token: str,
 ):
+    """Authenticate and authorize a request according to EMQX HTTP ACL plugin"""
     claims = await get_claims(token)
 
     # Hit database for long-lived tokens
-    if llt_id := claims.get("llt_id"):
+    if claims.get("exp") is None:
         user = await get_user_from_claims(claims)
-        if user.llt_id != llt_id:
+        if user.token != token:
             msg = "Long life token is not valid!"
             LOGGER.error("%s\n%s", msg, client)
             raise HTTPException(403, msg)
@@ -286,10 +299,10 @@ async def get_token(claims: Dict = Depends(get_claims)) -> str:
     """Get the long-life-token of this user"""
     user = await get_user_from_claims(claims)
 
-    if not user.llt_id:
-        raise HTTPException(404, "No long-life-token available!")
+    if token := user.token:
+        return token
 
-    return user.llt_id
+    raise HTTPException(404, "No long-life-token available!")
 
 
 @app.post("/token")
@@ -297,13 +310,12 @@ async def create_token(claims: Dict = Depends(get_claims)) -> Dict:
     """Generate a new long-life-token"""
     user = await get_user_from_claims(claims)
 
-    llt_id = uuid4()
-    jwt_token = create_jwt_token(user, None, llt_id)
+    jwt_token = create_jwt_token(user, None)
 
-    query = users.update().where(User.id == user.id).values(llt_id=str(llt_id))
+    query = users.update().where(User.id == user.id).values(token=jwt_token)
     await database.execute(query)
 
-    return {"token_id": llt_id, "token": jwt_token}
+    return {"token": jwt_token}
 
 
 @app.delete("/token")
@@ -311,11 +323,7 @@ async def delete_token(claims: Dict = Depends(get_claims)):
     """Delete the long-life-token of this user"""
     user = await get_user_from_claims(claims)
 
-    query = users.update().where(User.id == user.id).values(llt_id=None)
+    query = users.update().where(User.id == user.id).values(token=None)
     await database.execute(query)
 
     return JSONResponse("Token deleted")
-
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)

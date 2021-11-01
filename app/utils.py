@@ -20,15 +20,15 @@ def mqtt_match(pattern: str, topic: str) -> bool:
     topic_levels = topic.split(SEPARATOR)
     last_index = len(pattern_levels) - 1
 
-    for ix, (current_pattern, current_topic) in enumerate(
+    for index, (current_pattern, current_topic) in enumerate(
         zip_longest(pattern_levels, topic_levels)
     ):
         # Only allow '#' wildcard at the end
         if current_pattern == ALL:
-            return ix == last_index
+            return index == last_index
 
         # Pattern and topic should be equal unless pattern is a '+' wildcard
-        if (current_pattern != SINGLE) and (current_pattern != current_topic):
+        if current_pattern not in (SINGLE, current_topic):
             return False
 
     # If we get to here, we have no earlier mismatches

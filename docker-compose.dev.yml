@@ -1,6 +1,36 @@
 version: '3'
 services:
 
+  traefik:
+    image: "traefik:v2.4"
+    command:
+      - "--log.level=DEBUG"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:7000"
+      - "--entrypoints.mqtt.address=:7001"
+    ports:
+      - 7000:7000
+      - 7001:7001
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+  crowsnest-auth:
+    build: .
+    labels:
+      - "traefik.enable=true"
+      - traefik.http.routers.crowsnest-auth.rule=PathPrefix(`/auth`)
+      - traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth"
+      - traefik.http.routers.crowsnest-auth.middlewares=auth-strip
+      - traefik.http.middlewares.crowsnest-auth.forwardauth.address=http://crowsnest-auth/verify
+      - traefik.http.middlewares.crowsnest-auth.forwardauth.trustForwardHeader=true
+    ports:
+      - 7002:80
+    environment:
+      - USER_DATABASE_URL=postgresql://test:test@postgres:5432/test
+    depends_on:
+      - postgres
+
   emqx:
     image: emqx/emqx
     ports:
@@ -10,9 +40,18 @@ services:
     environment:
       - EMQX_NAME=test
       - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard,emqx_auth_http"
-      - EMQX_AUTH__HTTP__ACL_REQ=http://localhost:8000/verify_emqx
+      - EMQX_AUTH__HTTP__ACL_REQ=http://crowsnest-auth/verify_emqx
       - EMQX_AUTH__HTTP__ACL_REQ__METHOD=get
       - EMQX_AUTH__HTTP__ACL_REQ__PARAMS="client=%c,topic=%t,token=%P"
+
+  http_microservice:
+    image: containous/whoami:latest
+    ports:
+      - 7003:80
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.http_example.rule=PathPrefix(`/whoami`)"
+      - "traefik.http.routers.http_example.middlewares=crowsnest-auth"
 
   postgres:
     image: "postgres"

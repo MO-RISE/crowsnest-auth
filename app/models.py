@@ -17,7 +17,7 @@ class User(Base):  # pylint: disable=missing-class-docstring,too-few-public-meth
     path_blacklist = Column(ARRAY(String(255), dimensions=1))
     topic_whitelist = Column(ARRAY(String(255), dimensions=1))
     topic_blacklist = Column(ARRAY(String(255), dimensions=1))
-    llt_id = Column(String(255))
+    token = Column(String(255))
 
     @classmethod
     def from_record(cls, record: Record):

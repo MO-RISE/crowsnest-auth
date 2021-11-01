@@ -1,18 +1,23 @@
 from pathlib import Path
 
 import pytest
+import requests
 import psycopg2
 from sqlalchemy import create_engine
 
 from app.models import User, users
 
 
-def is_responsive(uri):
+def postgres_is_responsive(uri):
     try:
         conn = psycopg2.connect(uri)
         return True
     except Exception:
         return False
+
+
+def traefik_is_responsive(uri):
+    return requests.get(uri).status_code != 404
 
 
 @pytest.fixture(scope="session")
@@ -21,21 +26,25 @@ def docker_compose_file(pytestconfig):
 
 
 @pytest.fixture(scope="session")
-def pgdb(docker_ip, docker_services):
+def compose(docker_ip, docker_services):
     """Ensure that the postgres db service is up and responsive."""
 
-    # `port_for` takes a container port and returns the corresponding host port
-    port = docker_services.port_for("postgres", 5432)
-    uri = f"postgresql://test:test@{docker_ip}:{port}/test"
+    uris = {
+        "postgres": f"postgresql://test:test@{docker_ip}:{docker_services.port_for('postgres', 5432)}/test",
+        "crowsnest-auth": f"http://{docker_ip}:7000/auth",
+        "whoami": f"http://{docker_ip}:7000/whoami",
+    }
+
     docker_services.wait_until_responsive(
-        timeout=30.0, pause=0.1, check=lambda: is_responsive(uri)
+        timeout=10.0, pause=0.1, check=lambda: postgres_is_responsive(uris["postgres"])
     )
-    return uri
+
+    return uris
 
 
 @pytest.fixture
-def pgdb_connection(pgdb):
-    engine = create_engine(pgdb)
+def pgdb_connection(compose):
+    engine = create_engine(compose["postgres"])
     with engine.connect() as con:
         yield con
 
