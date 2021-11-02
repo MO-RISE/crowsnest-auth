@@ -115,10 +115,6 @@ def create_jwt_token(user: User, exp: timedelta = None) -> str:
         claims.update({"path_whitelist": user.path_whitelist})
     if user.path_blacklist:
         claims.update({"path_blacklist": user.path_blacklist})
-    if user.topic_whitelist:
-        claims.update({"topic_whitelist": user.topic_whitelist})
-    if user.topic_blacklist:
-        claims.update({"topic_blacklist": user.topic_blacklist})
 
     return jwt.encode(claims, JWT_TOKEN_SECRET, algorithm="HS256")
 
@@ -255,23 +251,15 @@ async def verify(request: Request, token: str = Depends(oauth2_scheme)):
 
 @app.get("/verify_emqx")
 async def verify_emqx(
-    client: str,
+    username: str,
     topic: str,
-    token: str,
 ):
     """Authenticate and authorize a request according to EMQX HTTP ACL plugin"""
-    claims = await get_claims(token)
-
-    # Hit database for long-lived tokens
-    if claims.get("exp") is None:
-        user = await get_user_from_claims(claims)
-        if user.token != token:
-            msg = "Long life token is not valid!"
-            LOGGER.error("%s\n%s", msg, client)
-            raise HTTPException(403, msg)
+    query = users.select().where(User.username == username)
+    user: User = User.from_record(await database.fetch_one(query))
 
     # ACL checks
-    if patterns := claims.get("topic_whitelist"):
+    if patterns := user.topic_whitelist:
         accepted = False
         for pattern in patterns:
             if mqtt_match(pattern, topic):
@@ -280,7 +268,7 @@ async def verify_emqx(
         if not accepted:
             raise HTTPException(403, f"Access is not allowed to {topic}")
 
-    if patterns := claims.get("topic_blacklist"):
+    if patterns := user.topic_blacklist:
         accepted = True
         for pattern in patterns:
             if mqtt_match(pattern, topic):
@@ -290,7 +278,7 @@ async def verify_emqx(
             raise HTTPException(403, f"Access is not allowed to {topic}")
 
     # Accepted!
-    return JSONResponse("Access allowed!")
+    return JSONResponse("Authorized")
 
 
 # Long-lived tokens

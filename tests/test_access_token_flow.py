@@ -111,17 +111,12 @@ def test_verify_path_blacklist(compose, set_admin_user_fields):
 
 def test_verify_emqx(compose):
     with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "admin"})
-        assert response.status_code == 200, response.text
-
-        token = response.cookies["crowsnest-auth-access"]
 
         response = tc.get(
             "/verify_emqx",
             params={
-                "client": "muppet",
+                "username": "admin",
                 "topic": "any/trial/topic",
-                "token": token,
             },
         )
         assert response.status_code == 200
@@ -130,28 +125,16 @@ def test_verify_emqx(compose):
 def test_verify_emqx_topic_whitelist(compose, set_admin_user_fields):
     set_admin_user_fields(topic_whitelist=["any/+/topic/#"])
     with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "admin"})
-        assert response.status_code == 200, response.text
-
-        token = response.cookies["crowsnest-auth-access"]
 
         response = tc.get(
             "/verify_emqx",
-            params={
-                "client": "muppet",
-                "topic": "any/trial/topic",
-                "token": token,
-            },
+            params={"username": "admin", "topic": "any/trial/topic"},
         )
         assert response.status_code == 200, response.text
 
         response = tc.get(
             "/verify_emqx",
-            params={
-                "client": "muppet",
-                "topic": "any/trial/",
-                "token": token,
-            },
+            params={"username": "admin", "topic": "any/trial/"},
         )
         assert response.status_code == 403, response.text
 
@@ -159,27 +142,15 @@ def test_verify_emqx_topic_whitelist(compose, set_admin_user_fields):
 def test_verify_emqx_topic_blacklist(compose, set_admin_user_fields):
     set_admin_user_fields(topic_blacklist=["any/+/topic/#"])
     with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "admin"})
-        assert response.status_code == 200, response.text
-
-        token = response.cookies["crowsnest-auth-access"]
 
         response = tc.get(
             "/verify_emqx",
-            params={
-                "client": "muppet",
-                "topic": "something/else/trial/topic",
-                "token": token,
-            },
+            params={"username": "admin", "topic": "something/else/trial/topic"},
         )
         assert response.status_code == 200, response.text
 
         response = tc.get(
             "/verify_emqx",
-            params={
-                "client": "muppet",
-                "topic": "any/trial/topic/",
-                "token": token,
-            },
+            params={"username": "admin", "topic": "any/trial/topic/"},
         )
         assert response.status_code == 403, response.text
