@@ -40,9 +40,11 @@ USER_DATABASE_URL = env("USER_DATABASE_URL")
 ADMIN_USER_USERNAME = "admin"
 ADMIN_USER_PASSWORD = env("ADMIN_USER_PASSWORD", "admin")
 
+BASE_URL = env("BASE_URL", "")
+
 
 # Setting up app and other context
-app = FastAPI()
+app = FastAPI(root_path=BASE_URL)
 oauth2_scheme = OAuth2PasswordBearerOrCookie(
     tokenUrl="login", cookie_name=ACCESS_COOKIE_NAME
 )
@@ -162,7 +164,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     # Query database
     query = users.select().where(User.username == username)
-    user = User.from_record(await database.fetch_one(query))
+    record = await database.fetch_one(query)
+    if not record:
+        raise HTTPException(401, "Could not validate credentials")
+
+    user = User.from_record(record)
 
     # Compare credentials
     if not pwd_context.verify(password, user.hashed_password):
@@ -256,7 +262,11 @@ async def verify_emqx(
 ):
     """Authenticate and authorize a request according to EMQX HTTP ACL plugin"""
     query = users.select().where(User.username == username)
-    user: User = User.from_record(await database.fetch_one(query))
+    record = await database.fetch_one(query)
+    if not record:
+        raise HTTPException(403, "Access not allowed")
+
+    user = User.from_record(record)
 
     # ACL checks
     if patterns := user.topic_whitelist:
