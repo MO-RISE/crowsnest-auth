@@ -28,9 +28,8 @@ def docker_compose_file(pytestconfig):
 @pytest.fixture(scope="session")
 def compose(docker_ip, docker_services):
     """Ensure that the postgres db service is up and responsive."""
-
     uris = {
-        "postgres": f"postgresql://test:test@{docker_ip}:{docker_services.port_for('postgres', 5432)}/test",
+        "postgres": f"postgresql://admin:password@{docker_ip}:{docker_services.port_for('auth_db', 5432)}/crowsnest_auth",
         "auth": f"http://{docker_ip}:7000/auth",
         "whoami": f"http://{docker_ip}:7000/whoami",
     }

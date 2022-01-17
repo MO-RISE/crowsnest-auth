@@ -6,7 +6,7 @@ from app.main import app
 def test_access_is_denied_without_logging_in(compose):
     with TestClient(app) as tc:
         response = tc.get("/verify")
-        assert response.status_code == 401, response.text
+        assert response.status_code == 307, response.text
 
 
 def test_access_is_denied_with_funky_token_in_headers(compose):

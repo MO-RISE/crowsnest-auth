@@ -4,6 +4,7 @@ import logging
 from typing import Dict
 from datetime import datetime, timedelta
 import re
+from urllib import parse
 
 from fastapi import FastAPI, Depends, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
@@ -14,10 +15,15 @@ from passlib.context import CryptContext
 from environs import Env
 from databases import Database
 from sqlalchemy import create_engine
+from starlette.responses import RedirectResponse
+
 
 # pylint: disable=import-error
 from .models import users, User, Base
-from .oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
+from .oauth2_password_bearer_cookie import (
+    OAuth2PasswordBearerOrCookie,
+    RequiresLoginException,
+)
 from .utils import mqtt_match
 
 LOGGER = logging.getLogger(__name__)
@@ -25,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 # Reading config from environment variables
 env = Env()
 
-ACCESS_COOKIE_DOMAIN = env("COOKIE_DOMAIN", None)
+ACCESS_COOKIE_DOMAIN = env("ACCESS_COOKIE_DOMAIN", None)
 ACCESS_COOKIE_NAME = env("ACCESS_COOKIE_NAME", "crowsnest-auth-access")
 ACCESS_COOKIE_SECURE = env.bool("ACCESS_COOKIE_SECURE", False)
 ACCESS_COOKIE_HTTPONLY = env.bool("ACCESS_COOKIE_HTTPONLY", True)
@@ -41,7 +47,6 @@ ADMIN_USER_USERNAME = "admin"
 ADMIN_USER_PASSWORD = env("ADMIN_USER_PASSWORD", "admin")
 
 BASE_URL = env("BASE_URL", "")
-
 
 # Setting up app and other context
 app = FastAPI(root_path=BASE_URL)
@@ -150,6 +155,21 @@ async def get_user_from_claims(claims: Dict) -> User:
     user_id = claims.get("sub")
     query = users.select().where(User.id == int(user_id))
     return User.from_record(await database.fetch_one(query))
+
+
+## Exceptions ###
+
+
+@app.exception_handler(RequiresLoginException)
+async def exception_handler(request: Request, exc: RequiresLoginException) -> Response:
+    uri = request.headers.get("X-Forwarded-Uri", "")
+    redirect_url = (
+        "http://"
+        + ACCESS_COOKIE_DOMAIN
+        + "/login?url="
+        + parse.quote("http://" + ACCESS_COOKIE_DOMAIN + uri)
+    )
+    return RedirectResponse(url=redirect_url)
 
 
 ## Routes ##

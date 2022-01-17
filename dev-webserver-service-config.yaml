@@ -1,0 +1,12 @@
+## Dynamic configuration
+http:
+  routers:
+    to-webserver:
+      service: webserver
+      rule: "PathPrefix(`/login`)"
+
+  services:
+    webserver:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:3000"
