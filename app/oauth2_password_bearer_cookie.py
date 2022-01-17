@@ -8,7 +8,7 @@ from starlette.requests import Request
 
 
 class RequiresLoginException(Exception):
-    pass
+    """Exception raised when login is required."""
 
 
 class OAuth2PasswordBearerOrCookie(OAuth2):  # pylint: disable=too-few-public-methods

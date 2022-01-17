@@ -18,7 +18,7 @@ from sqlalchemy import create_engine
 from starlette.responses import RedirectResponse
 
 
-# pylint: disable=import-error
+# pylint: disable=import-error, relative-beyond-top-level
 from .models import users, User, Base
 from .oauth2_password_bearer_cookie import (
     OAuth2PasswordBearerOrCookie,
@@ -161,7 +161,8 @@ async def get_user_from_claims(claims: Dict) -> User:
 
 
 @app.exception_handler(RequiresLoginException)
-async def exception_handler(request: Request, exc: RequiresLoginException) -> Response:
+async def exception_handler(request: Request) -> Response:
+    """Handle Requires Login Exception"""
     uri = request.headers.get("X-Forwarded-Uri", "")
     redirect_url = (
         "http://"
