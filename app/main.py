@@ -31,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 # Reading config from environment variables
 env = Env()
 
-ACCESS_COOKIE_DOMAIN = env("ACCESS_COOKIE_DOMAIN", None)
+ACCESS_COOKIE_DOMAIN = env("ACCESS_COOKIE_DOMAIN")
 ACCESS_COOKIE_NAME = env("ACCESS_COOKIE_NAME", "crowsnest-auth-access")
 ACCESS_COOKIE_SECURE = env.bool("ACCESS_COOKIE_SECURE", False)
 ACCESS_COOKIE_HTTPONLY = env.bool("ACCESS_COOKIE_HTTPONLY", True)
@@ -43,10 +43,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
 JWT_TOKEN_SECRET = env("JWT_TOKEN_SECRET", os.urandom(24))
 
 USER_DATABASE_URL = env("USER_DATABASE_URL")
-ADMIN_USER_USERNAME = "admin"
-ADMIN_USER_PASSWORD = env("ADMIN_USER_PASSWORD", "admin")
-
-BASE_URL = env("BASE_URL", "")
+ADMIN_USER_USERNAME = env("ADMIN_USERNAME", "admin")
+ADMIN_USER_PASSWORD = env("ADMIN_USER_PASSWORD")
+BASE_URL = env("BASE_URL")
 
 # Setting up app and other context
 app = FastAPI(root_path=BASE_URL)
@@ -161,7 +160,7 @@ async def get_user_from_claims(claims: Dict) -> User:
 
 
 @app.exception_handler(RequiresLoginException)
-async def exception_handler(request: Request) -> Response:
+async def exception_handler(request: Request, exc: RequiresLoginException) -> Response:
     """Handle Requires Login Exception"""
     uri = request.headers.get("X-Forwarded-Uri", "")
     redirect_url = (
@@ -222,6 +221,7 @@ async def logout(response: Response, _: Dict = Depends(get_claims)):
         _ (Dict, optional): To authenticate the user. Defaults to get_claims.
     """
     response.delete_cookie(ACCESS_COOKIE_NAME)
+    response.status_code = 200
     return response
 
 

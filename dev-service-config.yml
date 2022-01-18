@@ -1,0 +1,33 @@
+## Dynamic configuration
+http:
+  routers:
+    to-webserver:
+      service: webserver
+      rule: "PathPrefix(`/login`)"
+
+    to-auth:
+      service: auth
+      middlewares:
+        - "auth-strip"
+      rule: "PathPrefix(`/auth`)"
+
+  middlewares:
+    auth-strip:
+      stripPrefix:
+        prefixes:
+          - "/auth"
+
+    forward-auth:
+      forwardAuth:
+        address: "http://host.docker.internal:8000/verify"
+        trustForwardHeader: true
+
+  services:
+    webserver:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:3000"
+    auth:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:8000"

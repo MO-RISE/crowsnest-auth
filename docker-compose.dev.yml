@@ -8,7 +8,7 @@ services:
       - "--providers.docker=true"
       - "--api.dashboard=true"
       - "--api.insecure=true"
-      - "--providers.file.filename=/dev-webserver-service-config.yaml"
+      - "--providers.file.filename=/dev-service-config.yml"
       - "--providers.docker.exposedbydefault=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.web-secure.address=:443"
@@ -18,18 +18,18 @@ services:
       - 443:443
       - 1883:1883
       - 8080:8080
-      - 7000:7000
-      - 7001:7001
+      #- 7000:7000
+      #- 7001:7001
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "./dev-webserver-service-config.yaml:/dev-webserver-service-config.yaml"
+      - "./dev-service-config.yml:/dev-service-config.yml"
 
   http_microservice:
     image: containous/whoami:latest
     
     labels:
       - traefik.http.routers.http_example.rule=Path(`/whoami`)
-      - traefik.http.routers.http_example.middlewares=crowsnest-auth
+      - traefik.http.routers.http_example.middlewares=forward-auth@file
   
   auth_db:
      image: "postgres:14.0-alpine"
@@ -39,42 +39,22 @@ services:
        - POSTGRES_USER=admin
        - POSTGRES_PASSWORD=password
        - POSTGRES_DB=crowsnest_auth
-
-
-  crowsnest-auth:
-    depends_on:
-      - auth_db
-    build: .
-    labels:
-      - traefik.http.routers.crowsnest-auth.rule=PathPrefix(`/auth`)
-      - traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth
-      - traefik.http.routers.crowsnest-auth.middlewares=auth-strip
-      - traefik.http.middlewares.crowsnest-auth.forwardauth.address=http://crowsnest-auth/verify
-      - traefik.http.middlewares.crowsnest-auth.forwardauth.trustForwardHeader=true
-
-    environment:
-      - USER_DATABASE_URL=postgresql://admin:password@auth_db/crowsnest_auth
-      - ACCESS_COOKIE_DOMAIN=localhost
-      - ACCESS_COOKIE_HTTPONLY=true
-      - ACCESS_TOKEN_EXPIRE_MINUTES=5259600
-      - ADMIN_USER_PASSWORD=password
-      - BASE_URL=/auth
-  
-  # emqx:
-  #   image: emqx/emqx
-  #   ports:
-  #     - 8083:8083
-  #     - 8001:18083
-  #   environment:
-  #     - EMQX_NAME=test
-  #     - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard,emqx_auth_http"
-  #     - EMQX_AUTH__HTTP__AUTH_REQ__URL=http://crowsnest-auth/login
-  #     - EMQX_AUTH__HTTP__AUTH_REQ__METHOD=post
-  #     - EMQX_AUTH__HTTP__AUTH_REQ__HEADERS__CONTENT-TYPE=application/x-www-form-urlencoded
-  #     - EMQX_AUTH__HTTP__AUTH_REQ__PARAMS=username=%u,password=%P
-  #     - EMQX_AUTH__HTTP__ACL_REQ__URL=http://crowsnest-auth/verify_emqx
-  #     - EMQX_AUTH__HTTP__ACL_REQ__METHOD=get
-  #     - EMQX_AUTH__HTTP__ACL_REQ__PARAMS=username=%u,topic=%t
+ 
+#  emqx:
+#    image: emqx/emqx
+#    ports:
+#      - 8083:8083
+#      - 8001:18083
+#    environment:
+#      - EMQX_NAME=test
+#      - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard,emqx_auth_http"
+#      - EMQX_AUTH__HTTP__AUTH_REQ__URL=http://crowsnest-auth/login
+#      - EMQX_AUTH__HTTP__AUTH_REQ__METHOD=post
+#      - EMQX_AUTH__HTTP__AUTH_REQ__HEADERS__CONTENT-TYPE=application/x-www-form-urlencoded
+#      - EMQX_AUTH__HTTP__AUTH_REQ__PARAMS=username=%u,password=%P
+#      - EMQX_AUTH__HTTP__ACL_REQ__URL=http://crowsnest-auth/verify_emqx
+#      - EMQX_AUTH__HTTP__ACL_REQ__METHOD=get
+#      - EMQX_AUTH__HTTP__ACL_REQ__PARAMS=username=%u,topic=%t
 
 
     
