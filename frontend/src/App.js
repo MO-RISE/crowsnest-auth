@@ -206,8 +206,6 @@ function Prompt({cookies}) {
         </Backdrop>
 }
 
-
-
 function App() {
   return (
    <CookiesProvider>

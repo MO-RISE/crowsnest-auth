@@ -22,7 +22,7 @@ def traefik_is_responsive(uri):
 
 @pytest.fixture(scope="session")
 def docker_compose_file(pytestconfig):
-    return Path(pytestconfig.rootdir) / "docker-compose.dev.yml"
+    return Path(pytestconfig.rootdir) / "docker-compose.test.yml"
 
 
 @pytest.fixture(scope="session")

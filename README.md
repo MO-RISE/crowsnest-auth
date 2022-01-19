@@ -21,6 +21,8 @@ Requires:
 - vscode
 - Nodejs >= 14.0
 
+### Setup
+
 1. Install the python requirements in a virtual environment:
 
 ```cmd
@@ -49,22 +51,19 @@ npm install frontend
    docker-compose -f docker-compose.dev.yml up
    ```
 
-   b. Start the python API (`main.py`) by pressing `F5`.
+   b. Start the python API by pressing `F5` in vscode, or:
+
+   ```cmd
+   export $(xargs < .env)
+   uvicorn app.main:app --reload --port 8000
+   ```
+
    c. Start the React development server:
 
    ```cmd
    cd frontend
    npm start
    ```
-
-### Developing/debugging
-
-Get a development/debug session running:
-
-1. Open vscode with the repo root as the workspace directory
-2. Make sure vscode detects your virtual environment
-3. Start the docker-compose stack defined in `docker-compose.dev.yml`
-4. Start `main.py` through the vs code debugger (F5 button)
 
 ### Run linters
 
@@ -80,3 +79,10 @@ pytest tests/
 ```
 
 **Note**: Running the testsuite will fail if you have the development docker-compose stack still running.
+
+## Production
+
+The following environmental variables are necessary:
+
+- `ACCESS_COOKIE_DOMAIN`
+- `USER_DATABASE_URL`

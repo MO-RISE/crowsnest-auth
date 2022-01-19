@@ -3,12 +3,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
-def test_access_is_denied_without_logging_in(compose):
-    with TestClient(app) as tc:
-        response = tc.get("/verify")
-        assert response.status_code == 307, response.text
-
-
 def test_access_is_denied_with_funky_token_in_headers(compose):
     with TestClient(app) as tc:
         response = tc.get("/verify", headers={"Authorization": "Bearer FunkyToken"})
@@ -18,6 +12,8 @@ def test_access_is_denied_with_funky_token_in_headers(compose):
 def test_access_is_denied_with_funky_token_in_cookie(compose):
     with TestClient(app) as tc:
         response = tc.get("/verify", cookies={"crowsnest-auth-access": "FunkyToken"})
+        print(response.headers)
+        print(response.content)
         assert response.status_code == 401, response.text
 
 

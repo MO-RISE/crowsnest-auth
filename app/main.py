@@ -5,9 +5,7 @@ from typing import Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import re
 from urllib import parse
-import sys
 
-import uvicorn
 from fastapi import FastAPI, Depends, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -21,10 +19,9 @@ from starlette.responses import RedirectResponse
 
 
 # pylint: disable=import-error, relative-beyond-top-level
-from models import users, User, Base
-from oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
-
-from utils import mqtt_match
+from .models import users, User, Base
+from .oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
+from .utils import mqtt_match
 
 LOGGER = logging.getLogger(__name__)
 
@@ -407,15 +404,3 @@ async def delete_token(claims: Dict = Depends(get_credentials)):
     await database.execute(query)
 
     return JSONResponse("Token deleted")
-
-
-if __name__ == "__main__":
-
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "-dev":
-            # export ACCESS_COOKIE_DOMAIN="localhost"
-            uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
-        else:
-            raise RuntimeError("Unrecognized argument.")
-    else:
-        uvicorn.run("main:app", host="0.0.0.0", port=80, reload=False)

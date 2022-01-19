@@ -18,8 +18,7 @@ services:
       - 443:443
       - 1883:1883
       - 8080:8080
-      #- 7000:7000
-      #- 7001:7001
+
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - "./dev-service-config.yml:/dev-service-config.yml"

@@ -1,5 +1,5 @@
 uvicorn
-fastapi=0.71.0
+fastapi==0.71.0
 pydantic
 python-multipart
 environs

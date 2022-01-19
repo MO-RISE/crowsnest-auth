@@ -8,7 +8,6 @@ services:
       - "--providers.docker=true"
       - "--api.dashboard=true"
       - "--api.insecure=true"
-      - "--providers.file.filename=/dev-webserver-service-config.yaml"
       - "--providers.docker.exposedbydefault=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.web-secure.address=:443"
@@ -22,7 +21,6 @@ services:
       - 7001:7001
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "./dev-webserver-service-config.yaml:/dev-webserver-service-config.yaml"
 
   http_microservice:
     image: containous/whoami:latest
@@ -40,14 +38,22 @@ services:
        - POSTGRES_PASSWORD=password
        - POSTGRES_DB=crowsnest_auth
 
+  crowsnest-auth-frontend:
+    build: 
+      context: ./
+      dockerfile: Dockerfile-frontend
+    labels:
+      - traefik.http.routers.crowsnest-auth-frontend.rule=PathPrefix(`/auth`)
 
   crowsnest-auth:
     depends_on:
       - auth_db
-    build: .
+    build: 
+      context: ./
+      dockerfile: Dockerfile-backend
     labels:
-      - traefik.http.routers.crowsnest-auth.rule=PathPrefix(`/auth`)
-      - traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth
+      - traefik.http.routers.crowsnest-auth.rule=PathPrefix(`/auth/api`)
+      - traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth/api
       - traefik.http.routers.crowsnest-auth.middlewares=auth-strip
       - traefik.http.middlewares.crowsnest-auth.forwardauth.address=http://crowsnest-auth/verify
       - traefik.http.middlewares.crowsnest-auth.forwardauth.trustForwardHeader=true
@@ -58,23 +64,23 @@ services:
       - ACCESS_COOKIE_HTTPONLY=true
       - ACCESS_TOKEN_EXPIRE_MINUTES=5259600
       - ADMIN_USER_PASSWORD=password
-      - BASE_URL=/auth
+      - BASE_URL=/auth/api
   
-  # emqx:
-  #   image: emqx/emqx
-  #   ports:
-  #     - 8083:8083
-  #     - 8001:18083
-  #   environment:
-  #     - EMQX_NAME=test
-  #     - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard,emqx_auth_http"
-  #     - EMQX_AUTH__HTTP__AUTH_REQ__URL=http://crowsnest-auth/login
-  #     - EMQX_AUTH__HTTP__AUTH_REQ__METHOD=post
-  #     - EMQX_AUTH__HTTP__AUTH_REQ__HEADERS__CONTENT-TYPE=application/x-www-form-urlencoded
-  #     - EMQX_AUTH__HTTP__AUTH_REQ__PARAMS=username=%u,password=%P
-  #     - EMQX_AUTH__HTTP__ACL_REQ__URL=http://crowsnest-auth/verify_emqx
-  #     - EMQX_AUTH__HTTP__ACL_REQ__METHOD=get
-  #     - EMQX_AUTH__HTTP__ACL_REQ__PARAMS=username=%u,topic=%t
+  emqx:
+    image: emqx/emqx
+    ports:
+      - 8083:8083
+      - 8001:18083
+    environment:
+      - EMQX_NAME=test
+      - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard,emqx_auth_http"
+      - EMQX_AUTH__HTTP__AUTH_REQ__URL=http://crowsnest-auth/login
+      - EMQX_AUTH__HTTP__AUTH_REQ__METHOD=post
+      - EMQX_AUTH__HTTP__AUTH_REQ__HEADERS__CONTENT-TYPE=application/x-www-form-urlencoded
+      - EMQX_AUTH__HTTP__AUTH_REQ__PARAMS=username=%u,password=%P
+      - EMQX_AUTH__HTTP__ACL_REQ__URL=http://crowsnest-auth/verify_emqx
+      - EMQX_AUTH__HTTP__ACL_REQ__METHOD=get
+      - EMQX_AUTH__HTTP__ACL_REQ__PARAMS=username=%u,topic=%t
 
 
     
