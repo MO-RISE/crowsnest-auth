@@ -20,18 +20,19 @@ import { ReactComponent as CrowsnestLogo } from './crowsnest-logo.svg';
 /* eslint-disable no-undef */
 async function login(username, password) {
   var reqBody = "username="+username+"&password="+password+"&grant_type=password";
-  return fetch(process.env.REACT_APP_CROWSNEST_URL + '/auth/login', {
+  return fetch('http://' + window.location.hostname + '/auth/api/login', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
     },
     credentials: 'include',
     body: reqBody
-  }).then(response => response.status)
+  }).then(response => response)
 }
 /* eslint-enable no-undef*/
 
-function LoginPrompt({cookies}) {
+
+function Prompt({cookies}) {
     const [values, setValues] = React.useState({
         username: '',
         password: '',
@@ -40,7 +41,14 @@ function LoginPrompt({cookies}) {
         disableButton: false,
 
     })
-    const [redirectUrl, setRedirectUrl] = React.useState(process.env.REACT_APP_CROWSNEST_URL)
+    
+    const [state, setState] = React.useState({
+        redirectUrl: "http://" + window.location.hostname + "/auth",
+        redirectMessage: '',
+        logged: false,
+        username: ''
+    })
+    
 
     const handleChange = (prop) => (event) => {
         setValues({ ...values, [prop]: event.target.value, disableButton:false, errorMessage:'' });
@@ -54,30 +62,52 @@ function LoginPrompt({cookies}) {
         event.preventDefault();
     };
 
-    
     const handleLogin = async () => {
         if (values.username.length < 1 || values.password.length < 1) {
             setValues({...values, errorMessage: "Empty username or password!", disableButton: true})
         } else {
             const response = await login(values.username, values.password);
-            if (response === 200) {
+            if (response.status === 200) {
                 setValues({...values, disableButton: true})
-                window.location.replace(redirectUrl)
+                window.location.replace(state.redirectUrl)
             } else {
-                setValues({...values, errorMessage: "Invalid username or password!", disableButton: true})
+                setValues({...values, errorMessage: response.statusText, disableButton: true})
             }
       }
     }
 
-    // Determine where to redirect
+    const handleLogout = async() => {
+        fetch('http://' +  window.location.hostname + '/auth/api/logout',{method: 'POST'}).then(response => {
+            if (response.ok) {
+                window.location.replace(state.redirectUrl)
+            } else {
+                setValues({...values, errorMessage: "Unexpected error!"})
+            }
+        })
+    }
+
+    // Parse url
     React.useEffect(() => {
         const queryString = window.location.search;
         const urlParams = new URLSearchParams(queryString);
         const url = urlParams.get('url')
         if (url) {
-            setRedirectUrl(url);
+            setState(s => ({...s, redirectUrl: url}))
+        }
+        const message = urlParams.get('message')
+        if (message) {
+            setState(s => ({...s, redirectMessage: message}))
         }
     },[])
+
+    // Determine if already logged in
+    React.useEffect(() => {
+        fetch('http://' +  window.location.hostname + '/auth/api/status',{credentials:'include',headers:{'Accept': 'application/json'}}).then(
+            response => response.json()).then(
+                data => {
+                    setState(s => ({...s, username: data.username, logged: data.logged,}))
+                })
+    },[])   
 
     // Pressing "Enter" is submits the credentials.
     React.useEffect(() => {
@@ -95,21 +125,8 @@ function LoginPrompt({cookies}) {
         };
     }, [values]);
 
-    return <Backdrop open>
-        <Box sx={{
-                bgcolor: 'background.paper',
-                boxShadow: 1,
-                borderRadius: 1,
-                p: 2,
-            }}>
-                <Box sx={{
-                    m: 1,
-                    width: '25ch',
-                    textAlign: 'center',
-                }}>
-                    <CrowsnestLogo style={{ height: 150, width: 150 }} />
-                </Box>
-                <Box>
+    const Login = <>
+        <Box>
                     <TextField
                         sx={{m: 1, width: '25ch'}}
                         label={'Username'}
@@ -145,9 +162,46 @@ function LoginPrompt({cookies}) {
                 <Box sx={{textAlign: 'center'}}>
                     <Button variant="text" disabled={values.disableButton} onClick={()=>handleLogin()}>Login</Button>
                 </Box>
+                
+    </>
+
+    const Logout = <>
+        <Box sx={{textAlign: 'center'}}>
+            <Typography variant='caption'>Logged-in as:</Typography>
+        </Box>
+        <Box sx={{textAlign: 'center'}}>
+            <Typography variant='body2'>{state.username}</Typography>
+        </Box>
+        <Box sx={{textAlign: 'center'}}>
+            {state.redirectMessage.length !== 0 && <Typography sx={{color: 'error.main'}}>{state.redirectMessage}</Typography> }
+        </Box>
+        <Box sx={{textAlign: 'center'}}>
+            <Button variant="text" disabled={values.disableButton} onClick={()=>handleLogout()}>Logout</Button>
+        </Box>
+    </>
+
+    return <Backdrop open>
+        <Box sx={{
+                bgcolor: 'background.paper',
+                boxShadow: 1,
+                borderRadius: 1,
+                p: 2,
+            }}>
+                <Box sx={{
+                    m: 1,
+                    width: '25ch',
+                    textAlign: 'center',
+                }}>
+                    <CrowsnestLogo style={{ height: 150, width: 150 }} />
+                </Box>
+                <Box sx={{textAlign: 'center'}}>
+                    {state.redirectMessage.length !== 0 && <Typography sx={{color: 'error.main'}}>{state.redirectMessage}</Typography> }
+                </Box>
+                {state.logged ? Logout : Login}
                 <Box sx={{textAlign: 'center'}}>
                     {values.errorMessage.length !== 0 && <Typography sx={{color: 'error.main'}}>{values.errorMessage}</Typography> }
                 </Box>
+                
             </Box>
         </Backdrop>
 }
@@ -157,7 +211,7 @@ function LoginPrompt({cookies}) {
 function App() {
   return (
    <CookiesProvider>
-      <LoginPrompt />
+      <Prompt />
    </CookiesProvider>
   );
 }

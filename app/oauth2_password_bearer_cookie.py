@@ -1,14 +1,10 @@
 """OAuth2 implementation for using either a Bearer token or a cookie"""
-from typing import Dict, Optional
+from typing import Dict, Tuple, Optional
 
 from fastapi.openapi.models import OAuthFlows as OAuthFlowsModel
 from fastapi.security.utils import get_authorization_scheme_param
 from fastapi.security import OAuth2
 from starlette.requests import Request
-
-
-class RequiresLoginException(Exception):
-    """Exception raised when login is required."""
 
 
 class OAuth2PasswordBearerOrCookie(OAuth2):  # pylint: disable=too-few-public-methods
@@ -42,15 +38,13 @@ class OAuth2PasswordBearerOrCookie(OAuth2):  # pylint: disable=too-few-public-me
         )
         self.cookie_name = cookie_name
 
-    async def __call__(self, request: Request) -> Optional[str]:
+    async def __call__(self, request: Request) -> Tuple[str, str]:
+        token_type = "bearer"
         authorization: str = request.headers.get("Authorization")
         scheme, token = get_authorization_scheme_param(authorization)
 
         if not token or token.lower() == "undefined" or scheme.lower() != "bearer":
+            token_type = "cookie"
             token: str = request.cookies.get(self.cookie_name)
 
-        if not token:
-            if self.auto_error:
-                raise RequiresLoginException
-            return None
-        return token
+        return token_type, token

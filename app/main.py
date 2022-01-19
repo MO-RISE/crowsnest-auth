@@ -1,11 +1,13 @@
 """Crow's Nest Auth microservice"""
 import os
 import logging
-from typing import Dict
+from typing import Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import re
 from urllib import parse
+import sys
 
+import uvicorn
 from fastapi import FastAPI, Depends, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -19,12 +21,10 @@ from starlette.responses import RedirectResponse
 
 
 # pylint: disable=import-error, relative-beyond-top-level
-from .models import users, User, Base
-from .oauth2_password_bearer_cookie import (
-    OAuth2PasswordBearerOrCookie,
-    RequiresLoginException,
-)
-from .utils import mqtt_match
+from models import users, User, Base
+from oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
+
+from utils import mqtt_match
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +57,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Initialize async connection to database for any further usage
 database = Database(USER_DATABASE_URL)
+
+# class RequiresLoginException(Exception):
+#    """Exception raised when login is required."""
 
 
 @app.on_event("startup")
@@ -125,20 +128,49 @@ def create_jwt_token(user: User, exp: timedelta = None) -> str:
     return jwt.encode(claims, JWT_TOKEN_SECRET, algorithm="HS256")
 
 
-async def get_claims(token: str = Depends(oauth2_scheme)) -> Dict:
+async def get_credentials(
+    token_tuple: Tuple[str, str] = Depends(oauth2_scheme)
+) -> Dict:
     """Decode claims from a token"""
     # pylint: disable=raise-missing-from
+    token_type, token = token_tuple
+
+    if not token:
+        return {
+            "valid": False,
+            "message": "Login necessary" if token_type == "cookie" else "Missing token",
+            "claims": {},
+            "token_type": token_type,
+            "token": "",
+        }
+
     try:
-        return jwt.decode(token, JWT_TOKEN_SECRET, algorithms=["HS256"])
+        claims = jwt.decode(token, JWT_TOKEN_SECRET, algorithms=["HS256"])
+        message = ""
+        valid = True
     except ExpiredSignatureError as exc:
         LOGGER.exception(str(exc))
-        raise HTTPException(401, "Expired signature")
+        claims = {}
+        message = "Expired signature."
+        valid = False
     except JWTClaimsError as exc:
         LOGGER.exception(str(exc))
-        raise HTTPException(400, "Invalid claims")
+        claims = {}
+        message = "Invalid claims"
+        valid = False
     except JWTError as exc:
         LOGGER.exception(str(exc))
-        raise HTTPException(401, "Invalid signature")
+        claims = {}
+        message = "Invalid signatrue"
+        valid = False
+
+    return {
+        "valid": valid,
+        "message": message,
+        "claims": claims,
+        "token_type": token_type,
+        "token": token,
+    }
 
 
 async def get_user_from_claims(claims: Dict) -> User:
@@ -154,22 +186,6 @@ async def get_user_from_claims(claims: Dict) -> User:
     user_id = claims.get("sub")
     query = users.select().where(User.id == int(user_id))
     return User.from_record(await database.fetch_one(query))
-
-
-## Exceptions ###
-
-
-@app.exception_handler(RequiresLoginException)
-async def exception_handler(request: Request, exc: RequiresLoginException) -> Response:
-    """Handle Requires Login Exception"""
-    uri = request.headers.get("X-Forwarded-Uri", "")
-    redirect_url = (
-        "http://"
-        + ACCESS_COOKIE_DOMAIN
-        + "/login?url="
-        + parse.quote("http://" + ACCESS_COOKIE_DOMAIN + uri)
-    )
-    return RedirectResponse(url=redirect_url)
 
 
 ## Routes ##
@@ -213,29 +229,66 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 
 @app.post("/logout")
-async def logout(response: Response, _: Dict = Depends(get_claims)):
+async def logout(response: Response, credentials: Dict = Depends(get_credentials)):
     """Logout user
 
     Args:
         response (Response): The response objet
-        _ (Dict, optional): To authenticate the user. Defaults to get_claims.
+        _ (Dict, optional): To authenticate the user. Defaults to get_credentials.
     """
-    response.delete_cookie(ACCESS_COOKIE_NAME)
+    if credentials["valid"] and credentials["token_type"] == "cookie":
+        response.delete_cookie(ACCESS_COOKIE_NAME)
     response.status_code = 200
     return response
 
 
+# pylint: disable=unused-argument
+@app.get("/status")
+async def status(request: Request, credentials: Dict = Depends(get_credentials)):
+    """Check the user is logged in"""
+
+    if credentials["valid"] and credentials["token_type"] == "cookie":
+        user = await get_user_from_claims(credentials["claims"])
+        return JSONResponse({"logged": True, "username": user.username})
+
+    return JSONResponse({"logged": False})
+
+
+# pylint: enable=unused-argument
+
+
+def reject_request(
+    request: Request, token_type: str, message: str, status_code: Optional[int] = 401
+):
+    """If token_type is not a cookie, raise an HTTP error, otherwise redirect with url parametrs"""
+
+    if token_type != "cookie":
+        raise HTTPException(status_code, message)
+
+    uri = request.headers.get("X-Forwarded-Uri", "")
+    redirect_url = (
+        "http://"
+        + ACCESS_COOKIE_DOMAIN
+        + "/auth?url="
+        + parse.quote("http://" + ACCESS_COOKIE_DOMAIN + uri)
+        + "&message="
+        + parse.quote(message)
+    )
+    return RedirectResponse(url=redirect_url)
+
+
 @app.get("/verify")
-async def verify(request: Request, token: str = Depends(oauth2_scheme)):
+async def verify(request: Request, credentials: Dict = Depends(get_credentials)):
     """Authenticate and authorize a request according to Traefik ForwardAuth scheme
 
     Expects the following headers to be populated:
     - X-Forwarded-Host
     - X-Forwarded-Uri
     """
+    token_type = credentials["token_type"]
 
-    # Decode token (this is what authentcates the request!)
-    claims = await get_claims(token)
+    if not credentials["valid"]:
+        return reject_request(request, token_type, credentials["message"])
 
     host = request.headers.get("X-Forwarded-Host")
     uri = request.headers.get("X-Forwarded-Uri")
@@ -243,15 +296,20 @@ async def verify(request: Request, token: str = Depends(oauth2_scheme)):
     if not host or not uri:
         msg = "Missing required X-Forwarded-Headers"
         LOGGER.error("%s\n%s\n%s", msg, request.client, request.headers)
-        raise HTTPException(400, msg)
+        return reject_request(request, token_type, msg)
+
+    claims = credentials["claims"]
+
+    print("Here are the claims")
+    print(credentials)
 
     # Hit database for long-lived tokens
     if claims.get("exp") is None:
         user = await get_user_from_claims(claims)
-        if user.token != token:
+        if user.token != credentials["token"]:
             msg = "Long life token is not valid!"
             LOGGER.error("%s\n%s\n%s", msg, request.client, request.headers)
-            raise HTTPException(403, msg)
+            return reject_request(request, token_type, msg, status_code=403)
 
     # ACL checks
     if paths := claims.get("path_whitelist"):
@@ -259,9 +317,10 @@ async def verify(request: Request, token: str = Depends(oauth2_scheme)):
         for path in paths:
             if re.match(path, uri):
                 accepted = True
-
         if not accepted:
-            raise HTTPException(403, f"Access is not allowed to {uri}")
+            return reject_request(
+                request, token_type, f"Access is not allowed to {uri}", status_code=403
+            )
 
     if paths := claims.get("path_blacklist"):
         accepted = True
@@ -270,7 +329,9 @@ async def verify(request: Request, token: str = Depends(oauth2_scheme)):
                 accepted = False
 
         if not accepted:
-            raise HTTPException(403, f"Access is not allowed to {uri}")
+            return reject_request(
+                request, token_type, f"Access is not allowed to {uri}", status_code=403
+            )
 
     # Accepted!
     return JSONResponse("Access allowed!")
@@ -314,7 +375,7 @@ async def verify_emqx(
 
 # Long-lived tokens
 @app.get("/token")
-async def get_token(claims: Dict = Depends(get_claims)) -> str:
+async def get_token(claims: Dict = Depends(get_credentials)) -> str:
     """Get the long-life-token of this user"""
     user = await get_user_from_claims(claims)
 
@@ -325,7 +386,7 @@ async def get_token(claims: Dict = Depends(get_claims)) -> str:
 
 
 @app.post("/token")
-async def create_token(claims: Dict = Depends(get_claims)) -> Dict:
+async def create_token(claims: Dict = Depends(get_credentials)) -> Dict:
     """Generate a new long-life-token"""
     user = await get_user_from_claims(claims)
 
@@ -338,7 +399,7 @@ async def create_token(claims: Dict = Depends(get_claims)) -> Dict:
 
 
 @app.delete("/token")
-async def delete_token(claims: Dict = Depends(get_claims)):
+async def delete_token(claims: Dict = Depends(get_credentials)):
     """Delete the long-life-token of this user"""
     user = await get_user_from_claims(claims)
 
@@ -346,3 +407,15 @@ async def delete_token(claims: Dict = Depends(get_claims)):
     await database.execute(query)
 
     return JSONResponse("Token deleted")
+
+
+if __name__ == "__main__":
+
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "-dev":
+            # export ACCESS_COOKIE_DOMAIN="localhost"
+            uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+        else:
+            raise RuntimeError("Unrecognized argument.")
+    else:
+        uvicorn.run("main:app", host="0.0.0.0", port=80, reload=False)

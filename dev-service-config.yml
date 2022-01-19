@@ -3,19 +3,19 @@ http:
   routers:
     to-webserver:
       service: webserver
-      rule: "PathPrefix(`/login`)"
+      rule: "PathPrefix(`/auth`)"
 
     to-auth:
       service: auth
       middlewares:
         - "auth-strip"
-      rule: "PathPrefix(`/auth`)"
+      rule: "PathPrefix(`/auth/api`)"
 
   middlewares:
     auth-strip:
       stripPrefix:
         prefixes:
-          - "/auth"
+          - "/auth/api"
 
     forward-auth:
       forwardAuth:
