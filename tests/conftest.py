@@ -20,6 +20,7 @@ def traefik_is_responsive(uri):
     return requests.get(uri).status_code != 404
 
 
+# See https://github.com/avast/pytest-docker
 @pytest.fixture(scope="session")
 def docker_compose_file(pytestconfig):
     return Path(pytestconfig.rootdir) / "docker-compose.test.yml"

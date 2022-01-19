@@ -6,17 +6,11 @@ services:
     command:
       - "--log.level=DEBUG"
       - "--providers.docker=true"
-      - "--api.dashboard=true"
       - "--api.insecure=true"
       - "--providers.docker.exposedbydefault=true"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.web-secure.address=:443"
-      - "--entrypoints.mqtt.address=:1883"
+      - "--entrypoints.web.address=:7000"
+      - "--entrypoints.mqtt.address=:7001"
     ports:
-      - 80:80
-      - 443:443
-      - 1883:1883
-      - 8080:8080
       - 7000:7000
       - 7001:7001
     volumes:
@@ -24,7 +18,6 @@ services:
 
   http_microservice:
     image: containous/whoami:latest
-    
     labels:
       - traefik.http.routers.http_example.rule=Path(`/whoami`)
       - traefik.http.routers.http_example.middlewares=crowsnest-auth
