@@ -1,19 +1,31 @@
+import requests
 from fastapi.testclient import TestClient
+from requests.models import Response
 
 from app.main import app
 
 
 def test_login_error_with_wrong_credentials(compose):
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "foo"})
-        assert response.status_code == 401
+    response = requests.post(
+        compose["auth"] + "/api/login", {"username": "admin", "password": "foo"}
+    )
+    assert response.status_code == 401
+    # with TestClient(app) as tc:
+    #    response = tc.post("/login", {"username": "admin", "password": "foo"})
+    #    assert response.status_code == 401
 
 
 def test_login_ok_with_right_credentials(compose):
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "password"})
-        assert response.status_code == 200
-        assert response.cookies.get("crowsnest-auth-access") == "hey"
+    response = requests.post(
+        compose["auth"] + "/api/login", {"username": "admin", "password": "password"}
+    )
+    print(response.cookies)
+    assert response.status_code == 200
+    assert response.cookies["crowsnest-auth-access"]
+    # with TestClient(app) as tc:
+    #    response = tc.post("/login", {"username": "admin", "password": "password"})
+    #    assert response.status_code == 200
+    #    assert response.cookies.get("crowsnest-auth-access") == "hey"
 
 
 def test_verify_redirect_with_no_bearer_token_or_cookie(compose):
