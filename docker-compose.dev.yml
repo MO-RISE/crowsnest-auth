@@ -30,14 +30,14 @@ services:
       - traefik.http.routers.http_example.rule=Path(`/whoami`)
       - traefik.http.routers.http_example.middlewares=forward-auth@file
   
-  auth_db:
+  database:
      image: "postgres:14.0-alpine"
      ports:
       - 5432:5432
      environment:
        - POSTGRES_USER=admin
        - POSTGRES_PASSWORD=password
-       - POSTGRES_DB=crowsnest_auth
+       - POSTGRES_DB=users
  
 #  emqx:
 #    image: emqx/emqx

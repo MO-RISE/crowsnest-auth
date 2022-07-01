@@ -55,9 +55,6 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Initialize async connection to database for any further usage
 database = Database(USER_DATABASE_URL)
 
-# class RequiresLoginException(Exception):
-#    """Exception raised when login is required."""
-
 
 @app.on_event("startup")
 async def startup():
@@ -81,10 +78,38 @@ async def startup():
             .values(hashed_password=hashed_password)
         )
         await database.execute(query)
-
     else:
         query = users.insert().values(
-            username=ADMIN_USER_USERNAME, hashed_password=hashed_password
+            username=ADMIN_USER_USERNAME,
+            firstname="Gandalf",
+            lastname="The Grey",
+            email="gandalf@lotr.com",
+            admin=True,
+            hashed_password=hashed_password,
+        )
+        await database.execute(query)
+
+    # Create dummy user
+    query = users.select().where(User.username == "dummy")
+    dummy: User = await database.fetch_one(query)
+
+    hashed_password = pwd_context.hash("password")
+    if dummy:
+        query = (
+            users.update()
+            .where(User.username == "dummy")
+            .values(hashed_password=hashed_password)
+        )
+        await database.execute(query)
+    else:
+        query = users.insert().values(
+            username="dummy",
+            firstname="Dummy",
+            lastname="dasdas",
+            email="gandalf@lotr.com",
+            admin=False,
+            hashed_password=hashed_password,
+            path_whitelist=["/white"],
         )
         await database.execute(query)
 
@@ -95,21 +120,22 @@ async def shutdown():
     await database.disconnect()
 
 
-## JWY utility functions ##
+## JWT utility functions ##
 
 
 def create_jwt_token(user: User, exp: timedelta = None) -> str:
-    """Generate a JWT token string from a User instance
+    """Generate a JSON Web Token (JWT) string from a User instance
 
     Args:
-        user (User): The User instance to use as a basis
-        exp (timedelta, optional): Validity time. Defaults to None.
+        user (User): The User instance,
+        exp (timedelta, optional): Validity time in seconds. Defaults to None.
 
     Returns:
-        str: A Json Web Token
+        str: A JSON Web Token
     """
+
     claims = {
-        "sub": str(user.id),
+        "sub": str(user.username),
         "iat": (now := datetime.utcnow()),
     }
 
@@ -117,10 +143,10 @@ def create_jwt_token(user: User, exp: timedelta = None) -> str:
         claims.update({"exp": now + exp})
 
     # Add path whitelist/blacklist and topic whitelist/blacklist
-    if user.path_whitelist:
-        claims.update({"path_whitelist": user.path_whitelist})
-    if user.path_blacklist:
-        claims.update({"path_blacklist": user.path_blacklist})
+    # if user.path_whitelist:
+    #    claims.update({"path_whitelist": user.path_whitelist})
+    # if user.path_blacklist:
+    #    claims.update({"path_blacklist": user.path_blacklist})
 
     return jwt.encode(claims, JWT_TOKEN_SECRET, algorithm="HS256")
 
@@ -128,7 +154,8 @@ def create_jwt_token(user: User, exp: timedelta = None) -> str:
 async def get_credentials(
     token_tuple: Tuple[str, str] = Depends(oauth2_scheme)
 ) -> Dict:
-    """Decode claims from a token"""
+    """Get credentials"""
+
     # pylint: disable=raise-missing-from
     token_type, token = token_tuple
 
@@ -145,20 +172,20 @@ async def get_credentials(
         claims = jwt.decode(token, JWT_TOKEN_SECRET, algorithms=["HS256"])
         message = ""
         valid = True
-    except ExpiredSignatureError as exc:
-        LOGGER.exception(str(exc))
+    except ExpiredSignatureError:
         claims = {}
-        message = "Expired signature."
+        message = "Expired session"
+        LOGGER.exception(message)
         valid = False
-    except JWTClaimsError as exc:
-        LOGGER.exception(str(exc))
+    except JWTClaimsError:
         claims = {}
         message = "Invalid claims"
+        LOGGER.exception(message)
         valid = False
-    except JWTError as exc:
-        LOGGER.exception(str(exc))
+    except JWTError:
+        message = "Invalid token"
+        LOGGER.exception(message)
         claims = {}
-        message = "Invalid signatrue"
         valid = False
 
     return {
@@ -180,8 +207,8 @@ async def get_user_from_claims(claims: Dict) -> User:
     Returns:
         User: A user instance
     """
-    user_id = claims.get("sub")
-    query = users.select().where(User.id == int(user_id))
+    username = claims.get("sub")
+    query = users.select().where(User.username == username)
     return User.from_record(await database.fetch_one(query))
 
 
@@ -199,13 +226,13 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     query = users.select().where(User.username == username)
     record = await database.fetch_one(query)
     if not record:
-        raise HTTPException(401, "Could not validate credentials")
+        raise HTTPException(401, "Wrong username or password.")
 
     user = User.from_record(record)
 
     # Compare credentials
     if not pwd_context.verify(password, user.hashed_password):
-        raise HTTPException(401, "Could not validate credentials")
+        raise HTTPException(401, "Wrong username or password.")
 
     # Create token
     jwt_token: str = create_jwt_token(
@@ -214,14 +241,21 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     # Create response with cookie and return
     response = JSONResponse({"token": jwt_token})
+
+    # Cookie domain should not be used with localhost
+    access_cookie_domain = (
+        ACCESS_COOKIE_DOMAIN if "localhost" not in ACCESS_COOKIE_DOMAIN else None
+    )
+
     response.set_cookie(
         key=ACCESS_COOKIE_NAME,
         value=jwt_token,
         secure=ACCESS_COOKIE_SECURE,
         httponly=ACCESS_COOKIE_HTTPONLY,
         samesite=ACCESS_COOKIE_SAMESITE,
-        domain=ACCESS_COOKIE_DOMAIN,
+        domain=access_cookie_domain,
     )
+
     return response
 
 
@@ -242,11 +276,22 @@ async def logout(response: Response, credentials: Dict = Depends(get_credentials
 # pylint: disable=unused-argument
 @app.get("/status")
 async def status(request: Request, credentials: Dict = Depends(get_credentials)):
-    """Check the user is logged in"""
+    """Get the status of the user authentification"""
 
-    if credentials["valid"] and credentials["token_type"] == "cookie":
+    response = {}
+
+    if credentials["valid"]:
         user = await get_user_from_claims(credentials["claims"])
-        return JSONResponse({"logged": True, "username": user.username})
+        response["logged"] = True
+        response["username"] = user.username
+        response["token_type"] = credentials["token_type"]
+        response["token_issued__at"] = datetime.fromtimestamp(
+            credentials["claims"]["iat"]
+        ).strftime("%B %d, %Y %I:%M:%S")
+        response["token_expires_at"] = datetime.fromtimestamp(
+            credentials["claims"]["exp"]
+        ).strftime("%B %d, %Y %I:%M:%S")
+        return JSONResponse(response)
 
     return JSONResponse({"logged": False})
 
@@ -257,7 +302,11 @@ async def status(request: Request, credentials: Dict = Depends(get_credentials))
 def reject_request(
     request: Request, token_type: str, message: str, status_code: Optional[int] = 401
 ):
-    """If token_type is not a cookie, raise an HTTP error, otherwise redirect with url parametrs"""
+    """Reject a request.
+
+    If token_type is 'cookie' redirect to the URI in the 'X-Forwarded-Uri' request header,
+    otherwise raise the status_code (defaluts to 401: Unauthorized)
+    """
 
     if token_type != "cookie":
         raise HTTPException(status_code, message)
@@ -276,58 +325,59 @@ def reject_request(
 
 @app.get("/verify")
 async def verify(request: Request, credentials: Dict = Depends(get_credentials)):
-    """Authenticate and authorize a request according to Traefik ForwardAuth scheme
+    """Verify the permissions of a request"""
 
-    Expects the following headers to be populated:
-    - X-Forwarded-Host
-    - X-Forwarded-Uri
-    """
     token_type = credentials["token_type"]
 
     if not credentials["valid"]:
         return reject_request(request, token_type, credentials["message"])
 
-    host = request.headers.get("X-Forwarded-Host")
+    try:
+        user = await get_user_from_claims(credentials["claims"])
+    except:
+        return reject_request(request, token_type, "User does not exist")
+
     uri = request.headers.get("X-Forwarded-Uri")
+    host = request.headers.get("X-Forwarded-Host")
 
     if not host or not uri:
-        msg = "Missing required X-Forwarded-Headers"
-        LOGGER.error("%s\n%s\n%s", msg, request.client, request.headers)
-        return reject_request(request, token_type, msg)
+        msg = "Missing required X-Forwarded-Headers provided by Traefik"
+        raise HTTPException(400, msg)
 
-    claims = credentials["claims"]
-
-    print("Here are the claims")
-    print(credentials)
-
-    # Hit database for long-lived tokens
+    """
+    # Check if the long life token (i.e. no expiration) matches the one in the user database
     if claims.get("exp") is None:
         user = await get_user_from_claims(claims)
         if user.token != credentials["token"]:
             msg = "Long life token is not valid!"
             LOGGER.error("%s\n%s\n%s", msg, request.client, request.headers)
-            return reject_request(request, token_type, msg, status_code=403)
+            return reject_request(request, token_type, msg, status_code=401)
+    """
+    # Limit access to non-administrators
+    if "admin" in uri and not user.admin:
+        return reject_request(request, token_type, f"Unauthorized access to {uri}")
 
-    # ACL checks
-    if paths := claims.get("path_whitelist"):
+    # Access Control List checks
+
+    if user.path_whitelist:
         accepted = False
-        for path in paths:
+        for path in user.path_whitelist:
             if re.match(path, uri):
                 accepted = True
         if not accepted:
             return reject_request(
-                request, token_type, f"Access is not allowed to {uri}", status_code=403
+                request, token_type, f"Unauthorized access to {uri}", status_code=401
             )
 
-    if paths := claims.get("path_blacklist"):
+    if user.path_blacklist:
         accepted = True
-        for path in paths:
+        for path in user.path_blacklist:
             if re.match(path, uri):
                 accepted = False
 
         if not accepted:
             return reject_request(
-                request, token_type, f"Access is not allowed to {uri}", status_code=403
+                request, token_type, f"Unauthorized access to {uri}", status_code=401
             )
 
     # Accepted!

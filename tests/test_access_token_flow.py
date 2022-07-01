@@ -1,183 +1,119 @@
 import requests
-from fastapi.testclient import TestClient
-from requests.models import Response
-
-from app.main import app
+import json
+from app.models import User, users
 
 
-def test_login_error_with_wrong_credentials(compose):
+def test_redirect(compose):
+
+    # The client is redirected when requesting a protected resouce without providing a bearer token through a
+    # cookie or header ...
+    response = requests.get(compose["whoami"])
+    assert response.status_code == 200
+    assert response.history[0].status_code == 307
+
+    # ... or when providing an invalid bearer token in a cookie ....
+    response = requests.get(
+        compose["whoami"], cookies={"crowsnest-auth-access": "bad_token"}
+    )
+    assert response.status_code == 200
+    assert response.history[0].status_code == 307
+
+    # ... but providing an invalid bearer token in a header does not redirects the client
+    response = requests.get(
+        compose["whoami"], headers={"Authorization": "Bearer bad_token"}
+    )
+    assert response.status_code == 401
+    assert len(response.history) == 0
+
+
+def test_api_login(compose):
+
+    # A login request with wrong credentials ...
     response = requests.post(
         compose["auth"] + "/api/login", {"username": "admin", "password": "foo"}
     )
-    assert response.status_code == 401
-    # with TestClient(app) as tc:
-    #    response = tc.post("/login", {"username": "admin", "password": "foo"})
-    #    assert response.status_code == 401
 
+    # ... returns a status code HTTPError:400
+    assert response.status_code == 400
 
-def test_login_ok_with_right_credentials(compose):
+    # A login request with the right credentials ...
     response = requests.post(
         compose["auth"] + "/api/login", {"username": "admin", "password": "password"}
     )
-    print(response.cookies)
+
+    # ... returns a status code 200:OK ...
     assert response.status_code == 200
-    assert response.cookies["crowsnest-auth-access"]
-    # with TestClient(app) as tc:
-    #    response = tc.post("/login", {"username": "admin", "password": "password"})
-    #    assert response.status_code == 200
-    #    assert response.cookies.get("crowsnest-auth-access") == "hey"
+
+    # ... and returns a cookie containing the bearer token ...
+    cookies = response.cookies
+    assert "crowsnest-auth-access" in cookies.get_dict()
+
+    # ... as well as the bearer token in plain-text ...
+    token = json.loads(response.text)
+    assert "token" in token
+
+    # Protected resources are accessible by with the cookie ...
+    response = requests.get(compose["whoami"], cookies=cookies)
+    assert response.status_code == 200
+    assert len(response.history) == 0
+
+    # ... or by providing the bearer token in the request headers
+    response = requests.get(
+        compose["whoami"],
+        headers={
+            "Authorization": f"Bearer {cookies.get_dict()['crowsnest-auth-access']}",
+        },
+    )
+    assert response.status_code == 200
+    assert len(response.history) == 0
 
 
-def test_verify_redirect_with_no_bearer_token_or_cookie(compose):
-    with TestClient(app) as tc:
-        response = tc.get(
-            "/verify", headers={"X-Forwarded-Host": "test", "X-Forwarded-Uri": "test"}
-        )
-        # 404 because it can't find the page were it is redirected.
-        assert response.status_code == 404, response.text
+def test_api_verify(compose, make_dummy_user, set_dummy_user_fields):
 
+    # Log in as 'dummy_user'
+    response = requests.post(
+        compose["auth"] + "/api/login",
+        {"username": "dummy_user", "password": "password"},
+    )
+    assert response.status_code == 200
+    headers = {
+        "Authorization": f"Bearer {response.cookies.get_dict()['crowsnest-auth-access']}",
+    }
 
-def test_verify_error_with_wrong_bearer_token(compose):
-    with TestClient(app) as tc:
-        response = tc.get(
-            "/verify",
-            headers={
-                "X-Forwarded-Host": "test",
-                "X-Forwarded-Uri": "test",
-                "Authorization": "Bearer FunkyToken",
-            },
-        )
-        assert response.status_code == 401, response.text
+    # Add path whitelist to 'dummy_user'
+    set_dummy_user_fields(path_whitelist=["/white"], path_blacklist=None)
 
+    # Dummy can only access protected resource 'white' because its the only
+    # whitelisted resource
+    request = requests.get(compose["white"], headers=headers)
+    assert request.status_code == 200
+    request = requests.get(compose["black"], headers=headers)
+    assert request.status_code == 401
+    request = requests.get(compose["whoami"], headers=headers)
+    assert request.status_code == 401
 
-def test_verify_ok_with_right_cookie(compose):
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "password"})
-        cookies = response.cookies
-        response = tc.get(
-            "/verify",
-            cookies=cookies,
-            headers={"X-Forwarded-Host": "test", "X-Forwarded-Uri": "test"},
-        )
-        assert response.status_code == 200, response.text
+    # Dummy user has 'admin' set to false, so it cannot access protected
+    # resources with 'admin' in the uri
+    # request = requests.get(compose["auth"] + "/auth/admin", headers=headers)
+    # assert request.status_code == 401
+    # assert "Unauthorized access" in request.text
 
+    # Add path blacklist to 'dummy_user'
+    set_dummy_user_fields(path_whitelist=None, path_blacklist=["/black"])
 
-def test_verify_ok_with_right_bearer_token(compose):
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "password"})
-        response = tc.get(
-            "/verify",
-            headers={
-                "X-Forwarded-Host": "test",
-                "X-Forwarded-Uri": "test",
-                "Authorization": f"Bearer {response.cookies['crowsnest-auth-access']}",
-            },
-        )
-        assert response.status_code == 200
-
-
-def test_access_is_denied_with_funky_token_in_headers(compose):
-    with TestClient(app) as tc:
-        response = tc.get("/verify", headers={"Authorization": "Bearer FunkyToken"})
-        assert response.status_code == 401, response.text
+    # Dummy can access all protected resources except 'black' because its the only
+    # blacklisted resource
+    request = requests.get(compose["white"], headers=headers)
+    assert request.status_code == 200
+    request = requests.get(compose["black"], headers=headers)
+    assert request.status_code == 401
+    request = requests.get(compose["whoami"], headers=headers)
+    assert request.status_code == 200
 
 
 """
 
-# def test_access_is_denied_with_funky_token_in_cookie(compose):
-#     # Denied access redirects
-#     with TestClient(app) as tc:
-#         response = tc.get("/verify", cookies={"crowsnest-auth-access": "FunkyToken"})
-#         print(response)
-#         assert response.status_code == 200
 
-
-def test_access_is_allowed_with_cookie_when_logged_in(compose):
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "password"})
-        assert response.status_code == 200, response.text
-        response = tc.get(
-            "/verify",
-            cookies=response.cookies,
-            headers={"X-Forwarded-Host": "test", "X-Forwarded-Uri": "test"},
-        )
-        assert response.status_code == 200, response.text
-
-
-def test_access_is_allowed_with_bearer_header_when_logged_in(compose):
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "password"})
-        assert response.status_code == 200, response.text
-        print(response.status_code)
-        print(response.cookies["crowsnest-auth-access"])
-        response = tc.get(
-            "/verify",
-            headers={
-                "X-Forwarded-Host": "test",
-                "X-Forwarded-Uri": "test",
-                "Authorization": f"Bearer {response.cookies['crowsnest-auth-access']}",
-            },
-        )
-        assert response.status_code == 200, response.text
-
-
-def test_verify_complains_when_X_forwarded_headers_are_missing(compose):
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "admin"})
-        assert response.status_code == 200, response.text
-
-        response = tc.get(
-            "/verify",
-            cookies=response.cookies,
-        )
-        assert response.status_code == 400
-        assert response.json() == {"detail": "Missing required X-Forwarded-Headers"}
-
-
-def test_verify_path_whitelist(compose, set_admin_user_fields):
-    set_admin_user_fields(path_whitelist=["/test"])
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "admin"})
-        assert response.status_code == 200, response.text
-
-        # Should work
-        response = tc.get(
-            "/verify",
-            cookies=response.cookies,
-            headers={"X-Forwarded-Host": "test", "X-Forwarded-Uri": "/test"},
-        )
-        assert response.status_code == 200, response.text
-
-        # Should not work
-        response = tc.get(
-            "/verify",
-            cookies=response.cookies,
-            headers={"X-Forwarded-Host": "test", "X-Forwarded-Uri": "/not_test"},
-        )
-        assert response.status_code == 403, response.text
-
-
-def test_verify_path_blacklist(compose, set_admin_user_fields):
-    set_admin_user_fields(path_blacklist=["/test"])
-    with TestClient(app) as tc:
-        response = tc.post("/login", {"username": "admin", "password": "admin"})
-        assert response.status_code == 200, response.text
-
-        # Should work
-        response = tc.get(
-            "/verify",
-            cookies=response.cookies,
-            headers={"X-Forwarded-Host": "test", "X-Forwarded-Uri": "/anything"},
-        )
-        assert response.status_code == 200, response.text
-
-        # Should not work
-        response = tc.get(
-            "/verify",
-            cookies=response.cookies,
-            headers={"X-Forwarded-Host": "test", "X-Forwarded-Uri": "/test"},
-        )
-        assert response.status_code == 403, response.text
 
 
 def test_verify_emqx(compose):

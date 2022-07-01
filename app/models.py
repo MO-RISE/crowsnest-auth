@@ -1,6 +1,6 @@
 """SQLAlchemy ORM models"""
 
-from sqlalchemy import Column, BigInteger, String
+from sqlalchemy import Column, BigInteger, String, Boolean
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.declarative import declarative_base
 from databases.backends.postgres import Record
@@ -12,11 +12,15 @@ class User(Base):  # pylint: disable=missing-class-docstring,too-few-public-meth
     __tablename__ = "users"
     id = Column(BigInteger, primary_key=True, nullable=False, autoincrement=True)
     username = Column(String(255), index=True, nullable=False, unique=True)
-    hashed_password = Column(String(255), nullable=False)
+    firstname = Column(String(100), index=True, nullable=False)
+    lastname = Column(String(100), index=True, nullable=False)
+    email = Column(String(100), index=True, nullable=False)
+    admin = Column(Boolean(), nullable=False)
     path_whitelist = Column(ARRAY(String(255), dimensions=1))
     path_blacklist = Column(ARRAY(String(255), dimensions=1))
     topic_whitelist = Column(ARRAY(String(255), dimensions=1))
     topic_blacklist = Column(ARRAY(String(255), dimensions=1))
+    hashed_password = Column(String(255), nullable=False)
     token = Column(String(255))
 
     @classmethod

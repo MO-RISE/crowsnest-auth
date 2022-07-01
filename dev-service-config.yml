@@ -9,7 +9,7 @@ http:
       service: auth
       middlewares:
         - "auth-strip"
-      rule: "PathPrefix(`/auth/api`)"
+      rule: "PathPrefix(`/auth/api/{case:[a-z]+}`)"
 
   middlewares:
     auth-strip:
