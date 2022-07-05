@@ -1,27 +1,35 @@
 """Crow's Nest Auth microservice"""
+from array import array
 import os
 import logging
 from typing import Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import re
 from urllib import parse
+from typing import List
 
 from fastapi import FastAPI, Depends, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from fastapi.middleware.cors import CORSMiddleware
 from jose import jwt
 from jose.exceptions import JWTError, ExpiredSignatureError, JWTClaimsError
 from passlib.context import CryptContext
 from environs import Env
 from databases import Database
-from sqlalchemy import create_engine
+from sqlalchemy import JSON, create_engine
 from starlette.responses import RedirectResponse
-
+from pydantic import BaseModel
 
 # pylint: disable=import-error, relative-beyond-top-level
 from .models import users, User, Base
+from . import models
+from . import schemas
 from .oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
 from .utils import mqtt_match
+from . import crud
+from . import schemas
+from .exceptions import VerifyException, APIException
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,14 +54,114 @@ BASE_URL = env("BASE_URL")
 
 # Setting up app and other context
 app = FastAPI(root_path=BASE_URL)
+
 oauth2_scheme = OAuth2PasswordBearerOrCookie(
     tokenUrl="login", cookie_name=ACCESS_COOKIE_NAME
 )
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-
-# Initialize async connection to database for any further usage
 database = Database(USER_DATABASE_URL)
+
+
+# Allows CORS under development
+if env.bool("DEVELOPMENT"):
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+# Exception Handlers
+
+
+@app.exception_handler(APIException)
+async def api_exception_handler(request: Request, exc: APIException):
+    return JSONResponse(
+        status_code=exc.status_code, content={"success": False, "detail": exc.message}
+    )
+
+
+@app.exception_handler(VerifyException)
+async def redirect_or_exception_handler(request: Request, exc: VerifyException):
+    uri = request.headers.get("X-Forwarded-Uri", "")
+    host = request.headers.get("X-Forwarded-Host", "")
+
+    if "/api/" in uri:
+        raise APIException(exc.message)
+
+    redirect_url = (
+        "http://"
+        + host
+        + "/auth?url="
+        + parse.quote("http://" + host + uri)
+        + "&message="
+        + parse.quote(exc.message)
+    )
+    return RedirectResponse(redirect_url)
+
+
+# Dependencies
+
+
+async def get_claims_from_bearer_token(
+    token_tuple: Tuple[str, str] = Depends(oauth2_scheme)
+) -> Tuple[dict, str]:
+    """Get claims from bearer token"""
+    _, token = token_tuple
+    claims = None
+    if token is None:
+        message = "Login necessary"
+    else:
+        try:
+            claims = jwt.decode(token, JWT_TOKEN_SECRET, algorithms=["HS256"])
+            message = ""
+        except ExpiredSignatureError:
+            message = "Expired session"
+        except JWTClaimsError:
+            message = "Invalid claims"
+        except JWTError:
+            message = "Invalid token"
+    return claims, message
+
+
+async def get_user_from_bearer_token(
+    claims_tuple: Tuple[User, str] = Depends(get_claims_from_bearer_token),
+) -> Tuple[User, str]:
+    """Get User instance from bearer token"""
+    claims, message = claims_tuple
+    user = None
+    if claims is not None:
+        try:
+            query = users.select().where(User.username == claims["sub"])
+            user = User.from_record(await database.fetch_one(query))
+        except:
+            message = "User does not exist"
+    return user, message
+
+
+async def verify_token(
+    user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token)
+):
+    """Verify that the client provides a valid token"""
+    user, message = user_tuple
+    if not user:
+        raise APIException(401, message)
+
+
+async def verify_token_admin(
+    user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token)
+):
+    """Verify that the client provides a valid token and that the corresponding user is an administrator"""
+    user, message = user_tuple
+    if not user:
+        raise APIException(401, message)
+    else:
+        if not user.admin:
+            raise APIException(401, "Unauthorized access")
 
 
 @app.on_event("startup")
@@ -124,7 +232,7 @@ async def shutdown():
 
 
 def create_jwt_token(user: User, exp: timedelta = None) -> str:
-    """Generate a JSON Web Token (JWT) string from a User instance
+    """Create a JSON Web Token (JWT) string from a User instance
 
     Args:
         user (User): The User instance,
@@ -212,10 +320,10 @@ async def get_user_from_claims(claims: Dict) -> User:
     return User.from_record(await database.fetch_one(query))
 
 
-## Routes ##
+# *** Routes ****
 
 
-@app.post("/login")
+@app.post("/login", response_model=schemas.Response)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     """Login a user"""
 
@@ -226,27 +334,27 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     query = users.select().where(User.username == username)
     record = await database.fetch_one(query)
     if not record:
-        raise HTTPException(401, "Wrong username or password.")
-
+        raise APIException(401, "Wrong username or password")
     user = User.from_record(record)
 
     # Compare credentials
     if not pwd_context.verify(password, user.hashed_password):
-        raise HTTPException(401, "Wrong username or password.")
+        raise APIException(401, "Wrong username or password.")
 
     # Create token
     jwt_token: str = create_jwt_token(
         user, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
-    # Create response with cookie and return
-    response = JSONResponse({"token": jwt_token})
+    # Create response with cookie
+    response = JSONResponse(status_code=200, content={"success": True})
 
     # Cookie domain should not be used with localhost
     access_cookie_domain = (
         ACCESS_COOKIE_DOMAIN if "localhost" not in ACCESS_COOKIE_DOMAIN else None
     )
 
+    # Set Cookie
     response.set_cookie(
         key=ACCESS_COOKIE_NAME,
         value=jwt_token,
@@ -259,83 +367,45 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     return response
 
 
-@app.post("/logout")
-async def logout(response: Response, credentials: Dict = Depends(get_credentials)):
-    """Logout user
-
-    Args:
-        response (Response): The response objet
-        _ (Dict, optional): To authenticate the user. Defaults to get_credentials.
-    """
-    if credentials["valid"] and credentials["token_type"] == "cookie":
-        response.delete_cookie(ACCESS_COOKIE_NAME)
-    response.status_code = 200
+@app.post(
+    "/logout", dependencies=[Depends(verify_token)], response_model=schemas.Response
+)
+async def logout():
+    """Logout user"""
+    response = JSONResponse(status_code=200, content={"success": True})
+    response.delete_cookie(ACCESS_COOKIE_NAME)
     return response
 
 
-# pylint: disable=unused-argument
 @app.get("/status")
-async def status(request: Request, credentials: Dict = Depends(get_credentials)):
-    """Get the status of the user authentification"""
+async def status(
+    user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token),
+    claims_tuple: Tuple[dict, str] = Depends(get_claims_from_bearer_token),
+):
+    """Get the status of the user token"""
+    user, _ = user_tuple
+    claims, _ = claims_tuple
+
+    if not user:
+        return JSONResponse({"logged": False})
 
     response = {}
-
-    if credentials["valid"]:
-        user = await get_user_from_claims(credentials["claims"])
-        response["logged"] = True
-        response["username"] = user.username
-        response["token_type"] = credentials["token_type"]
-        response["token_issued__at"] = datetime.fromtimestamp(
-            credentials["claims"]["iat"]
-        ).strftime("%B %d, %Y %I:%M:%S")
-        response["token_expires_at"] = datetime.fromtimestamp(
-            credentials["claims"]["exp"]
-        ).strftime("%B %d, %Y %I:%M:%S")
-        return JSONResponse(response)
-
-    return JSONResponse({"logged": False})
-
-
-# pylint: enable=unused-argument
-
-
-def reject_request(
-    request: Request, token_type: str, message: str, status_code: Optional[int] = 401
-):
-    """Reject a request.
-
-    If token_type is 'cookie' redirect to the URI in the 'X-Forwarded-Uri' request header,
-    otherwise raise the status_code (defaluts to 401: Unauthorized)
-    """
-
-    if token_type != "cookie":
-        raise HTTPException(status_code, message)
-
-    uri = request.headers.get("X-Forwarded-Uri", "")
-    redirect_url = (
-        "http://"
-        + ACCESS_COOKIE_DOMAIN
-        + "/auth?url="
-        + parse.quote("http://" + ACCESS_COOKIE_DOMAIN + uri)
-        + "&message="
-        + parse.quote(message)
+    response["logged"] = True
+    response["username"] = user.username
+    response["token_issued__at"] = datetime.fromtimestamp(claims["iat"]).strftime(
+        "%B %d, %Y %I:%M:%S"
     )
-    return RedirectResponse(url=redirect_url)
+    response["token_expires_at"] = datetime.fromtimestamp(claims["exp"]).strftime(
+        "%B %d, %Y %I:%M:%S"
+    )
+    return JSONResponse(response)
 
 
-@app.get("/verify")
-async def verify(request: Request, credentials: Dict = Depends(get_credentials)):
-    """Verify the permissions of a request"""
-
-    token_type = credentials["token_type"]
-
-    if not credentials["valid"]:
-        return reject_request(request, token_type, credentials["message"])
-
-    try:
-        user = await get_user_from_claims(credentials["claims"])
-    except:
-        return reject_request(request, token_type, "User does not exist")
+@app.get("/verify", response_model=schemas.Response)
+async def verify_request(
+    request: Request, user_tuple: Tuple[dict, str] = Depends(get_user_from_bearer_token)
+):
+    """Verify that the user has the permissions for the request"""
 
     uri = request.headers.get("X-Forwarded-Uri")
     host = request.headers.get("X-Forwarded-Host")
@@ -344,30 +414,23 @@ async def verify(request: Request, credentials: Dict = Depends(get_credentials))
         msg = "Missing required X-Forwarded-Headers provided by Traefik"
         raise HTTPException(400, msg)
 
-    """
-    # Check if the long life token (i.e. no expiration) matches the one in the user database
-    if claims.get("exp") is None:
-        user = await get_user_from_claims(claims)
-        if user.token != credentials["token"]:
-            msg = "Long life token is not valid!"
-            LOGGER.error("%s\n%s\n%s", msg, request.client, request.headers)
-            return reject_request(request, token_type, msg, status_code=401)
-    """
+    # Get user
+    user, message = user_tuple
+    if not user:
+        raise VerifyException(message)
+
     # Limit access to non-administrators
-    if "admin" in uri and not user.admin:
-        return reject_request(request, token_type, f"Unauthorized access to {uri}")
+    if "admin" in uri and not user["admin"]:
+        raise VerifyException(f"Unauthorized access")
 
     # Access Control List checks
-
     if user.path_whitelist:
         accepted = False
         for path in user.path_whitelist:
             if re.match(path, uri):
                 accepted = True
         if not accepted:
-            return reject_request(
-                request, token_type, f"Unauthorized access to {uri}", status_code=401
-            )
+            raise VerifyException("Unauthorized access to {uri}")
 
     if user.path_blacklist:
         accepted = True
@@ -376,12 +439,9 @@ async def verify(request: Request, credentials: Dict = Depends(get_credentials))
                 accepted = False
 
         if not accepted:
-            return reject_request(
-                request, token_type, f"Unauthorized access to {uri}", status_code=401
-            )
+            raise VerifyException("Unauthorized access to {uri}")
 
-    # Accepted!
-    return JSONResponse("Access allowed!")
+    return JSONResponse(status_code=200, content={"success": True})
 
 
 @app.get("/verify_emqx")
@@ -420,37 +480,94 @@ async def verify_emqx(
     return JSONResponse("Authorized")
 
 
-# Long-lived tokens
-@app.get("/token")
-async def get_token(claims: Dict = Depends(get_credentials)) -> str:
-    """Get the long-life-token of this user"""
-    user = await get_user_from_claims(claims)
-
-    if token := user.token:
-        return token
-
-    raise HTTPException(404, "No long-life-token available!")
-
-
-@app.post("/token")
-async def create_token(claims: Dict = Depends(get_credentials)) -> Dict:
-    """Generate a new long-life-token"""
-    user = await get_user_from_claims(claims)
-
-    jwt_token = create_jwt_token(user, None)
-
-    query = users.update().where(User.id == user.id).values(token=jwt_token)
-    await database.execute(query)
-
-    return {"token": jwt_token}
+@app.get(
+    "/users",
+    response_model=List[schemas.UserOut],
+    dependencies=[Depends(verify_token_admin)],
+)
+async def get_all_users():
+    query = users.select()
+    user_records = await database.fetch_all(query)
+    return {"users": [dict(user) for user in user_records]}
 
 
-@app.delete("/token")
-async def delete_token(claims: Dict = Depends(get_credentials)):
-    """Delete the long-life-token of this user"""
-    user = await get_user_from_claims(claims)
+@app.get(
+    "/users/{username}",
+    response_model=schemas.UserOut,
+    dependencies=[Depends(verify_token_admin)],
+)
+async def get_user_by_username(username: str):
+    try:
+        return models.User.from_record(
+            await database.fetch_one(
+                models.users.select().where(models.User.username == username)
+            )
+        )
+    except Exception as e:
+        raise APIException(406, str(e))
 
-    query = users.update().where(User.id == user.id).values(token=None)
-    await database.execute(query)
 
-    return JSONResponse("Token deleted")
+@app.post(
+    "/users",
+    response_model=schemas.Response,
+    dependencies=[Depends(verify_token_admin)],
+)
+async def create_user(user: schemas.CreateUser):
+    hashed_password = pwd_context.hash(user.password)
+    try:
+        await database.execute(
+            models.users.insert().values(
+                username=user.username.lower(),
+                firstname=user.firstname,
+                lastname=user.lastname,
+                email=user.lastname,
+                admin=user.admin,
+                hashed_password=hashed_password,
+            )
+        )
+        return JSONResponse(status_code=200, content={"success": True})
+    except Exception as e:
+        raise APIException(
+            406, f"User with username '{user.username.lower()}' already exists"
+        )
+
+
+@app.post(
+    "/users/{username}",
+    response_model=schemas.Response,
+    dependencies=[Depends(verify_token_admin)],
+)
+async def modify_user(username: str, modifications: schemas.ModifyUser):
+    mods = {k: v for k, v in modifications.__dict__.items() if v is not None}
+    if "password" in mods:
+        mods["hashed_password"] = pwd_context.hash(modifications.password)
+        del mods["password"]
+    try:
+        await database.execute(
+            models.users.update().where(models.User.username == username).values(**mods)
+        )
+        return JSONResponse(status_code=200, content={"success": True})
+    except Exception as e:
+        raise APIException(406, f"User with username '{username}' does not exist")
+
+
+@app.delete(
+    "/users/{username}",
+    dependencies=[
+        Depends(verify_token_admin),
+    ],
+    response_model=schemas.Response,
+)
+async def delete_user(username: str):
+    try:
+        models.User.from_record(
+            await database.fetch_one(
+                models.users.select().where(models.User.username == username)
+            )
+        )
+        await database.execute(
+            models.users.delete().where(models.User.username == username)
+        )
+        return JSONResponse(status_code=200, content={"success": True})
+    except Exception as e:
+        raise APIException(406, f"User with username '{username}' does not exist")

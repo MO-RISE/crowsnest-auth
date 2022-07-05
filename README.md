@@ -65,6 +65,8 @@ npm install frontend
    npm start
    ```
 
+The API's documentation is available at `http://localhost/auth/api/docs`
+
 ### Run linters
 
 ```cmd
@@ -84,5 +86,18 @@ pytest tests/
 
 The following environmental variables are necessary:
 
-- `ACCESS_COOKIE_DOMAIN`
+- `ACCESS_COOKIE_DOMAIN` (e.g. 'www.foo.com')
 - `USER_DATABASE_URL`
+- `JWT_TOKEN_SECRET`
+
+Optional environmental variables:
+
+- `ACCESS_COOKIE_SECURE`
+- `ACCESS_COOKIE_HTTPONLY`
+- `ACCESS_COOKIE_SECURE`
+- `ACCESS_COOKIE_HTTPONLY`
+- `ACCESS_COOKIE_SAMESITE`
+- `ACCESS_TOKEN_EXPIRE_MINUTES`
+- `ADMIN_USER_USERNAME`
+- `ADMIN_USER_PASSWORD`
+- `BASE_URL`

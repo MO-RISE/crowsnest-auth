@@ -7,6 +7,7 @@ services:
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=true"
+      - "--entrypoints.web.address=:80"
     ports:
       - "80:80"
       - "443:443"
@@ -73,23 +74,25 @@ services:
 
   emqx:
     image: emqx/emqx:4.4.4
-    ports:
-      - 1883:1883
-      - 18083:18083
+    labels:
+      - "traefik.http.routers.emqx-ws.rule=PathPrefix(`/mqtt`)"
+      - "traefik.http.routers.emqx-ws.entryPoints=web"
+      - "traefik.http.routers.emqx-ws.service=emqx-ws-service"
+      - "traefik.http.services.emqx-ws-service.loadbalancer.server.port=8083"
     environment:
       - EMQX_NAME=foo-emqx
       - EMQX_LOG__LEVEL=debug
       - EMQX_LOG__TO=console
-      - EMQX_ALLOW_ANONYMOUS=false
-      - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard, emqx_auth_http"
-      - EMQX_AUTH__HTTP__AUTH_REQ__URL=http://crowsnest-auth/login
-      - EMQX_AUTH__HTTP__AUTH_REQ__METHOD=post
-      - EMQX_AUTH__HTTP__AUTH_REQ__HEADERS__CONTENT-TYPE=application/x-www-form-urlencoded
-      - EMQX_AUTH__HTTP__AUTH_REQ__PARAMS=username=%u,password=%P
-      - EMQX_AUTH__HTTP__SUPER_REQ__URL=http://crowsnest-auth/login
-      - EMQX_AUTH__HTTP__SUPER_REQ__METHOD=post
-      - EMQX_AUTH__HTTP__SUPER_REQ__PARAMS=username=%u,password=%P
-      - EMQX_AUTH__HTTP__SUPER_REQ__HEADERS__CONTENT-TYPE=application/x-www-form-urlencoded
+      # - EMQX_ALLOW_ANONYMOUS=false
+      # - EMQX_LOADED_PLUGINS="emqx_recon,emqx_retainer,emqx_management,emqx_dashboard, emqx_auth_http"
+      # - EMQX_AUTH__HTTP__AUTH_REQ__URL=http://crowsnest-auth/login
+      # - EMQX_AUTH__HTTP__AUTH_REQ__METHOD=post
+      # - EMQX_AUTH__HTTP__AUTH_REQ__HEADERS__CONTENT-TYPE=application/x-www-form-urlencoded
+      # - EMQX_AUTH__HTTP__AUTH_REQ__PARAMS=username=%u,password=%P
+      # - EMQX_AUTH__HTTP__SUPER_REQ__URL=http://crowsnest-auth/login
+      # - EMQX_AUTH__HTTP__SUPER_REQ__METHOD=post
+      # - EMQX_AUTH__HTTP__SUPER_REQ__PARAMS=username=%u,password=%P
+      # - EMQX_AUTH__HTTP__SUPER_REQ__HEADERS__CONTENT-TYPE=application/x-www-form-urlencoded
       # - EMQX_AUTH__HTTP__AUTH_REQ__PARAMS=username=%u,password=%P
       # - EMQX_AUTH__HTTP__ACL_REQ__URL=http://crowsnest-auth/verify_emqx
       # - EMQX_AUTH__HTTP__ACL_REQ__METHOD=get

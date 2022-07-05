@@ -8,3 +8,5 @@ python-jose[cryptography]
 databases[postgresql]
 sqlalchemy
 psycopg2-binary
+
+  

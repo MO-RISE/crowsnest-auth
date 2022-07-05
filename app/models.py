@@ -10,7 +10,7 @@ Base = declarative_base()
 
 class User(Base):  # pylint: disable=missing-class-docstring,too-few-public-methods
     __tablename__ = "users"
-    id = Column(BigInteger, primary_key=True, nullable=False, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
     username = Column(String(255), index=True, nullable=False, unique=True)
     firstname = Column(String(100), index=True, nullable=False)
     lastname = Column(String(100), index=True, nullable=False)
@@ -34,6 +34,12 @@ class User(Base):  # pylint: disable=missing-class-docstring,too-few-public-meth
             User: User instance
         """
         return cls(**dict(record))
+
+    def to_dict(self):
+        d = {}
+        for column in self.__table__.columns:
+            d[column.name] = str(getattr(self, column.name))
+        return d
 
 
 users = User.__table__

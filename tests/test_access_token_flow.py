@@ -110,6 +110,9 @@ def test_api_verify(compose, make_dummy_user, set_dummy_user_fields):
     request = requests.get(compose["whoami"], headers=headers)
     assert request.status_code == 200
 
+def test_verify_emqx(compose):
+
+    
 
 """
 
