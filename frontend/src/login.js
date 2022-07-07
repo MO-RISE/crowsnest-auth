@@ -27,78 +27,83 @@ export async function login ({username, password}) {
         headers: new Headers({'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'}),
     });
     const response = await fetch(request)
-    if (response.status !== 200) {
+    if (!response.ok) {
         const data = await response.json()
         throw new Error(data.detail)
-    }
+    } 
     return response
 }
 
 
 function LoginPrompt({admin}) {
-    const [values, setValues] = React.useState({
+
+    const [state, setState] = React.useState({
         username: '',
         password: '',
         showPassword: false,
         errorMessage: '',
         disableButton: false,
-
+        redirectUrl: "http://" + window.location.hostname + "/auth",
+        redirectMessage: '',
+        logged: false,
+        admin: false, 
     })
 
     const { enqueueSnackbar } = useSnackbar();
     
     const reactAdminLogin = useLogin()
-
-    const [state, setState] = React.useState({
-        redirectUrl: "http://" + window.location.hostname + "/auth",
-        redirectMessage: '',
-        logged: false,
-        username: ''
-    })
     
     const handleChange = (prop) => (event) => {
-        setValues({ ...values, [prop]: event.target.value, disableButton:false, errorMessage:'' });
+        setState({ ...state, [prop]: event.target.value, disableButton: false });
     };
 
-    const handleClickShowPassword = () => {
-        setValues({...values, showPassword: !values.showPassword})
+    const handleToggleShowPassword = () => {
+        setState({...state, showPassword: !state.showPassword})
     }
 
     const handleMouseDownPassword = (event) => {
         event.preventDefault();
     };
 
-    const handleLogin = async () => {
-        if (values.username.length < 1 || values.password.length < 1) {
-            enqueueSnackbar("Username or password are empty", {variant:"error"})
-            setValues({...values, disableButton: true})
-        } else {
-            if (admin) {
-                reactAdminLogin({username: values.username, password: values.password}).catch(
-                    (e)=>{ enqueueSnackbar(e.message, {variant:"error"})}
-                )
+    const handleLogin = React.useCallback(async () => {
+        if (!state.disableButton) {
+            if (state.username.length < 1 || state.password.length < 1) {
+                enqueueSnackbar("Username or password are empty", {variant:"error"})
+                setState({...state, disableButton: true})
             } else {
-                try {
-                    const response = await login({username: values.username, password: values.password})
-                    response.then(window.location.replace(state.redirectUrl))
-                } catch (error) {
-                    enqueueSnackbar(error.message, {variant:"error"})
-                };
+                if (admin) {
+                    reactAdminLogin({username: state.username, password: state.password}).catch(
+                        (e)=>{ enqueueSnackbar(e.message, {variant:"error"})}
+                    )
+                } else {
+                    try {
+                        const response = await login({username: state.username, password: state.password})                    
+                        if (response.ok) {
+                            window.location.replace(state.redirectUrl)
+                        }
+                       
+                    } catch (error) {
+                        enqueueSnackbar(error.message, {variant:"error"})
+                    };
+            
+                }
+            }
         }
-      }
-    }
+    }, [state, admin, enqueueSnackbar, reactAdminLogin])
 
     const handleLogout = async() => {
         fetch('http://' +  window.location.hostname + '/auth/api/logout',{method: 'POST'}).then(response => {
             if (response.ok) {
-                window.location.replace(state.redirectUrl)
+                setState({...state, logged: false})
             } else {
-                setValues({...values, errorMessage: "Unexpected error!"})
+                response.json().then(data => {
+                    enqueueSnackbar(data.detail, {variant:"error"})
+                })                
             }
         })
     }
 
-    // Parse url
+    // Retrieve parameters from the URL
     React.useEffect(() => {
         const queryString = window.location.search;
         const urlParams = new URLSearchParams(queryString);
@@ -108,35 +113,40 @@ function LoginPrompt({admin}) {
         }
         const message = urlParams.get('message')
         if (message) {
-            setState(s => ({...s, redirectMessage: message}))
+            enqueueSnackbar(message, {variant:"error"})
         }
-    },[])
+
+    },[enqueueSnackbar])
 
     // Determine if already logged in
     React.useEffect(() => {
-        fetch('http://' +  window.location.hostname + '/auth/api/status',{credentials:'include',headers:{'Accept': 'application/json'}}).then(
-            response => response.json()).then(
-                data => {
-                    setState(s => ({...s, username: data.username, logged: data.logged,}))
-                })
+        fetch('http://' +  window.location.hostname + '/auth/api/me',{credentials:'include',headers:{'Accept': 'application/json'}}).then(
+            response => {
+                if (!response.ok) {
+                    setState(s => ({...s, logged: false}))
+                } else {
+                    response.json().then(data => {
+                        setState(s => ({...s, username: data.username, logged: true, admin: data.admin}))
+                    })
+                }
+            })
     },[])   
 
     // Pressing "Enter" is submits the credentials.
     React.useEffect(() => {
-        const listener = event => {
-          if (event.code === "Enter" || event.code === "NumpadEnter") {
-            event.preventDefault();
-            if (!values.disableButton) {
-                //handleLogin()
-            }
-          }
-        };
-        document.addEventListener("keydown", listener);
-        return () => {
-          document.removeEventListener("keydown", listener);
-        };
-    }, [values]);
+    const listener = event => {
+        if (event.code === "Enter" || event.code === "NumpadEnter") {
+        event.preventDefault();
+        handleLogin()
+        }
+    };
+    document.addEventListener("keydown", listener);
+    return () => {
+        document.removeEventListener("keydown", listener)
+    }
+    },[handleLogin])
 
+ 
     const Login = <>
         <Box>
                     <TextField
@@ -144,7 +154,7 @@ function LoginPrompt({admin}) {
                         label={'Username'}
                         margin={'normal'}
                         onChange={handleChange('username')}
-                        required
+                        variant='outlined'
                     />
                 </Box>
                 <Box>
@@ -152,18 +162,17 @@ function LoginPrompt({admin}) {
                         <InputLabel htmlFor="outlined-adornment-password">Password</InputLabel>
                         <OutlinedInput
                             id="outlined-adornment-password"
-                            type={values.showPassword ? 'text' : 'password'}
-
+                            type={state.showPassword ? 'text' : 'password'}
                             onChange={handleChange('password')}
                             endAdornment={
                                 <InputAdornment position="end">
                                     <IconButton
                                     aria-label="toggle password visibility"
-                                    onClick={handleClickShowPassword}
+                                    onClick={handleToggleShowPassword}
                                     onMouseDown={handleMouseDownPassword}
                                     edge="end"
                                     >
-                                    {values.showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                    {state.showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
                                     </IconButton>
                                 </InputAdornment>
                             }
@@ -172,7 +181,7 @@ function LoginPrompt({admin}) {
                     </FormControl>
                 </Box>
                 <Box sx={{textAlign: 'center'}}>
-                    <Button variant="text" disabled={values.disableButton} onClick={()=>handleLogin()}>Login</Button>
+                    <Button variant="text" disabled={state.disableButton} onClick={()=>handleLogin()}>Login</Button>
                 </Box>
                 
     </>
@@ -182,7 +191,7 @@ function LoginPrompt({admin}) {
             <Typography variant='caption'>Logged-in as:</Typography>
         </Box>
         {state.admin && <Box>
-            <Typography variant="caption">Administrator</Typography>
+            <Typography variant="caption">User Administration</Typography>
         </Box>}
         <Box sx={{textAlign: 'center'}}>
             <Typography variant='body2'>{state.username}</Typography>
@@ -191,7 +200,7 @@ function LoginPrompt({admin}) {
             {state.redirectMessage.length !== 0 && <Typography sx={{color: 'error.main'}}>{state.redirectMessage}</Typography> }
         </Box>
         <Box sx={{textAlign: 'center'}}>
-            <Button variant="text" disabled={values.disableButton} onClick={()=>handleLogout()}>Logout</Button>
+            <Button variant="text" disabled={state.disableButton} onClick={()=>handleLogout()}>Logout</Button>
         </Box>
     </>
 
@@ -209,16 +218,12 @@ function LoginPrompt({admin}) {
                     <CrowsnestLogo style={{ height: 150, width: 150 }} />
                 </Box>
                 {admin && <Box sx={{textAlign: 'center'}}>
-                    <Typography variant="h8">Administrators</Typography>
+                    <Typography variant="h8">User Administration</Typography>
                 </Box>}
                 <Box sx={{textAlign: 'center'}}>
                     {state.redirectMessage.length !== 0 && <Typography sx={{color: 'error.main'}}>{state.redirectMessage}</Typography> }
                 </Box>
                 {state.logged ? Logout : Login}
-                <Box sx={{textAlign: 'center'}}>
-                    {values.errorMessage.length !== 0 && <Typography sx={{color: 'error.main'}}>{values.errorMessage}</Typography> }
-                </Box>
-                
             </Box>
       
     

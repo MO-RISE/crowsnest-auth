@@ -1,5 +1,4 @@
 """Crow's Nest Auth microservice"""
-from array import array
 import os
 import logging
 from typing import Dict, Optional, Tuple
@@ -19,7 +18,6 @@ from environs import Env
 from databases import Database
 from sqlalchemy import JSON, create_engine
 from starlette.responses import RedirectResponse
-from pydantic import BaseModel
 
 # pylint: disable=import-error, relative-beyond-top-level
 from .models import users, User, Base
@@ -27,7 +25,6 @@ from . import models
 from . import schemas
 from .oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
 from .utils import mqtt_match
-from . import crud
 from . import schemas
 from .exceptions import VerifyException, APIException
 
@@ -72,6 +69,7 @@ if env.bool("DEVELOPMENT"):
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["x-total-count"],
     )
 
 
@@ -334,12 +332,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     query = users.select().where(User.username == username)
     record = await database.fetch_one(query)
     if not record:
-        raise APIException(401, "Wrong username or password")
+        raise HTTPException(status_code=401, detail="Wrong username or password")
     user = User.from_record(record)
 
     # Compare credentials
     if not pwd_context.verify(password, user.hashed_password):
-        raise APIException(401, "Wrong username or password.")
+        raise HTTPException(status_code=400, detail="Wrong username or password.")
 
     # Create token
     jwt_token: str = create_jwt_token(
@@ -375,6 +373,18 @@ async def logout():
     response = JSONResponse(status_code=200, content={"success": True})
     response.delete_cookie(ACCESS_COOKIE_NAME)
     return response
+
+
+@app.get("/me", dependencies=[Depends(verify_token)])
+async def get_me(user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token)):
+    """Get the details of the current user"""
+    user, _ = user_tuple
+    return {
+        "username": user.username,
+        "admin": user.admin,
+        "firstname": user.firstname,
+        "lastname": user.lastname,
+    }
 
 
 @app.get("/status")
@@ -485,10 +495,12 @@ async def verify_emqx(
     response_model=List[schemas.UserOut],
     dependencies=[Depends(verify_token_admin)],
 )
-async def get_all_users():
+async def get_all_users(_end: int, _order: str, _sort: str, _start: int):
     query = users.select()
-    user_records = await database.fetch_all(query)
-    return {"users": [dict(user) for user in user_records]}
+    user_records = [dict(user) for user in await database.fetch_all(query)]
+    response = JSONResponse(user_records)
+    response.headers["x-total-count"] = str(len(user_records))
+    return response
 
 
 @app.get(
@@ -509,7 +521,6 @@ async def get_user_by_username(username: str):
 
 @app.post(
     "/users",
-    response_model=schemas.Response,
     dependencies=[Depends(verify_token_admin)],
 )
 async def create_user(user: schemas.CreateUser):

@@ -24,10 +24,10 @@ class UserOut(BaseModel):
     lastname: str
     email: str
     admin: bool
-    path_whitelist: list
-    path_blacklist: list
-    topic_whitelist: list
-    topic_blacklist: list
+    path_whitelist: list = None
+    path_blacklist: list = None
+    topic_whitelist: list = None
+    topic_blacklist: list = None
 
     class Config:
         orm_mode = True

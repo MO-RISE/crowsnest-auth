@@ -47,11 +47,14 @@ const authProvider = {
             method: 'GET',
             credentials: 'include',
         })
-        return fetch(request).then(response=>{
-            return response.json()}).then((data) => {
-                return {id:data.username, fullname:data.firstname}
-        })
+        const data = fetch(request).then(response=>response.json()).then((data) => { 
+            return {
+            id: data.username,
+            fullName: data.firstname + ' ' + data.lastname,
+        }})
         
+        
+        return Promise.resolve(data)
     },
     getPermissions: () => Promise.resolve(''),
 };

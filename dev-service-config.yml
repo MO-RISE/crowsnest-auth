@@ -8,11 +8,11 @@ http:
     to-auth:
       service: auth
       middlewares:
-        - "auth-strip"
-      rule: "PathPrefix(`/auth/api/{case:[a-z]+}`)"
+        - "auth-api-strip"
+      rule: "Path(`/auth/api/{case:[a-z]+}`)"
 
   middlewares:
-    auth-strip:
+    auth-api-strip:
       stripPrefix:
         prefixes:
           - "/auth/api"
