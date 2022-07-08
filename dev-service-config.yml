@@ -4,13 +4,14 @@ http:
     to-webserver:
       service: webserver
       rule: "PathPrefix(`/auth`)"
+      #rule: "Path(`/auth`,'/auth/')"
 
     to-auth:
       service: auth
       middlewares:
         - "auth-api-strip"
-      rule: "Path(`/auth/api/{case:[a-z]+}`)"
-
+      rule: "Path(`/auth/api/{case:[a-z0-9/]+}`)"
+      #rule: "PathPrefix(`/auth/api`)"
   middlewares:
     auth-api-strip:
       stripPrefix:

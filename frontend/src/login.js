@@ -41,7 +41,6 @@ function LoginPrompt({admin}) {
         username: '',
         password: '',
         showPassword: false,
-        errorMessage: '',
         disableButton: false,
         redirectUrl: "http://" + window.location.hostname + "/auth",
         redirectMessage: '',

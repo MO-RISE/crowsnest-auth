@@ -1,6 +1,6 @@
 """SQLAlchemy ORM models"""
 
-from sqlalchemy import Column, BigInteger, String, Boolean
+from sqlalchemy import Column, BigInteger, String, Boolean, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.declarative import declarative_base
 from databases.backends.postgres import Record
@@ -16,11 +16,11 @@ class User(Base):  # pylint: disable=missing-class-docstring,too-few-public-meth
     lastname = Column(String(100), index=True, nullable=False)
     email = Column(String(100), index=True, nullable=False)
     admin = Column(Boolean(), nullable=False)
-    path_whitelist = Column(ARRAY(String(255), dimensions=1))
-    path_blacklist = Column(ARRAY(String(255), dimensions=1))
-    topic_whitelist = Column(ARRAY(String(255), dimensions=1))
-    topic_blacklist = Column(ARRAY(String(255), dimensions=1))
-    hashed_password = Column(String(255), nullable=False)
+    path_whitelist = Column(String(255))
+    path_blacklist = Column(String(255))
+    topic_whitelist = Column(String(255))
+    topic_blacklist = Column(String(255))
+    hashed_password = Column(String(255))
     token = Column(String(255))
 
     @classmethod
@@ -38,7 +38,7 @@ class User(Base):  # pylint: disable=missing-class-docstring,too-few-public-meth
     def to_dict(self):
         d = {}
         for column in self.__table__.columns:
-            d[column.name] = str(getattr(self, column.name))
+            d[column.name] = getattr(self, column.name)
         return d
 
 

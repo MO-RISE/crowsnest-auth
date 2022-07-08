@@ -1,7 +1,8 @@
 """
 Schemas
 """
-from pydantic import BaseModel, root_validator
+from pydantic import BaseModel, root_validator, validator
+from typing import Optional
 
 
 class Response(BaseModel):
@@ -16,18 +17,26 @@ class CreateUser(BaseModel):
     email: str
     password: str
     admin: bool
+    path_whitelist: Optional[str]
+    path_blacklist: Optional[str]
+    topic_whitelist: Optional[str]
+    topic_blacklist: Optional[str]
+
+    class Config:
+        orm_mode = True
 
 
 class UserOut(BaseModel):
+    id: int
     username: str
     firstname: str
     lastname: str
     email: str
     admin: bool
-    path_whitelist: list = None
-    path_blacklist: list = None
-    topic_whitelist: list = None
-    topic_blacklist: list = None
+    path_whitelist: str = None
+    path_blacklist: str = None
+    topic_whitelist: str = None
+    topic_blacklist: str = None
 
     class Config:
         orm_mode = True
@@ -39,6 +48,10 @@ class ModifyUser(BaseModel):
     email: str = None
     password: str = None
     admin: bool = None
+    path_whitelist: str = None
+    path_blacklist: str = None
+    topic_whitelist: str = None
+    topic_blacklist: str = None
 
     @root_validator
     def check_at_least_one(cls, values):

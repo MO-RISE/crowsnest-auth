@@ -16,7 +16,7 @@ from jose.exceptions import JWTError, ExpiredSignatureError, JWTClaimsError
 from passlib.context import CryptContext
 from environs import Env
 from databases import Database
-from sqlalchemy import JSON, create_engine
+from sqlalchemy import JSON, create_engine, text
 from starlette.responses import RedirectResponse
 
 # pylint: disable=import-error, relative-beyond-top-level
@@ -78,9 +78,7 @@ if env.bool("DEVELOPMENT"):
 
 @app.exception_handler(APIException)
 async def api_exception_handler(request: Request, exc: APIException):
-    return JSONResponse(
-        status_code=exc.status_code, content={"success": False, "detail": exc.message}
-    )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
 @app.exception_handler(VerifyException)
@@ -215,7 +213,7 @@ async def startup():
             email="gandalf@lotr.com",
             admin=False,
             hashed_password=hashed_password,
-            path_whitelist=["/white"],
+            path_whitelist="/white",
         )
         await database.execute(query)
 
@@ -375,40 +373,26 @@ async def logout():
     return response
 
 
-@app.get("/me", dependencies=[Depends(verify_token)])
+@app.get(
+    "/me",
+    response_model=schemas.UserOut,
+    dependencies=[Depends(verify_token)],
+)
 async def get_me(user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token)):
     """Get the details of the current user"""
     user, _ = user_tuple
-    return {
-        "username": user.username,
-        "admin": user.admin,
-        "firstname": user.firstname,
-        "lastname": user.lastname,
-    }
+    return user
 
 
-@app.get("/status")
-async def status(
-    user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token),
-    claims_tuple: Tuple[dict, str] = Depends(get_claims_from_bearer_token),
-):
-    """Get the status of the user token"""
-    user, _ = user_tuple
-    claims, _ = claims_tuple
-
-    if not user:
-        return JSONResponse({"logged": False})
-
-    response = {}
-    response["logged"] = True
-    response["username"] = user.username
-    response["token_issued__at"] = datetime.fromtimestamp(claims["iat"]).strftime(
-        "%B %d, %Y %I:%M:%S"
-    )
-    response["token_expires_at"] = datetime.fromtimestamp(claims["exp"]).strftime(
-        "%B %d, %Y %I:%M:%S"
-    )
-    return JSONResponse(response)
+def validate_paths_text_string(text_string: str) -> bool:
+    """Validate that a text string containing pahts"""
+    if len(text_string) == 0:
+        return True
+    paths = text_string.split(",")
+    for path in paths:
+        if not re.match(r"/[a-z0-9/]+", path):
+            return False
+    return True
 
 
 @app.get("/verify", response_model=schemas.Response)
@@ -436,7 +420,7 @@ async def verify_request(
     # Access Control List checks
     if user.path_whitelist:
         accepted = False
-        for path in user.path_whitelist:
+        for path in user.path_whitelist.split(","):
             if re.match(path, uri):
                 accepted = True
         if not accepted:
@@ -444,7 +428,7 @@ async def verify_request(
 
     if user.path_blacklist:
         accepted = True
-        for path in user.path_blacklist:
+        for path in user.path_blacklist.split(","):
             if re.match(path, uri):
                 accepted = False
 
@@ -496,24 +480,27 @@ async def verify_emqx(
     dependencies=[Depends(verify_token_admin)],
 )
 async def get_all_users(_end: int, _order: str, _sort: str, _start: int):
-    query = users.select()
+    query = (
+        models.users.select().order_by(text(f"{_sort} {_order}")).slice(_start, _end)
+    )
     user_records = [dict(user) for user in await database.fetch_all(query)]
+
     response = JSONResponse(user_records)
-    response.headers["x-total-count"] = str(len(user_records))
+    response.headers["x-total-count"] = str(
+        len(await database.fetch_all(models.users.select()))
+    )
     return response
 
 
 @app.get(
-    "/users/{username}",
+    "/users/{id}",
     response_model=schemas.UserOut,
     dependencies=[Depends(verify_token_admin)],
 )
-async def get_user_by_username(username: str):
+async def get_user_by_id(id: int):
     try:
         return models.User.from_record(
-            await database.fetch_one(
-                models.users.select().where(models.User.username == username)
-            )
+            await database.fetch_one(models.users.select().where(models.User.id == id))
         )
     except Exception as e:
         raise APIException(406, str(e))
@@ -525,6 +512,9 @@ async def get_user_by_username(username: str):
 )
 async def create_user(user: schemas.CreateUser):
     hashed_password = pwd_context.hash(user.password)
+    print("Create user")
+    print(user)
+    print(user.path_whitelist)
     try:
         await database.execute(
             models.users.insert().values(
@@ -543,42 +533,59 @@ async def create_user(user: schemas.CreateUser):
         )
 
 
-@app.post(
-    "/users/{username}",
-    response_model=schemas.Response,
+@app.put(
+    "/users/{id}",
+    response_model=schemas.UserOut,
     dependencies=[Depends(verify_token_admin)],
 )
-async def modify_user(username: str, modifications: schemas.ModifyUser):
+async def modify_user(id: int, modifications: schemas.ModifyUser):
+    print("asd")
+    print(modifications.__dict__)
     mods = {k: v for k, v in modifications.__dict__.items() if v is not None}
+    # If provided, hash the password
     if "password" in mods:
         mods["hashed_password"] = pwd_context.hash(modifications.password)
         del mods["password"]
+
+    # Validate the paths_text_string
+    print(mods)
+    for key in [
+        "path_whitelist",
+        "path_blacklist",
+        "topic_whitelist",
+        "topic_blacklist",
+    ]:
+        if key in mods:
+            if not validate_paths_text_string(mods[key]):
+                raise HTTPException(status_code=422, detail=f"Invalid value for {key}")
+
+    # Update user in the database
     try:
         await database.execute(
-            models.users.update().where(models.User.username == username).values(**mods)
+            models.users.update().where(models.User.id == id).values(**mods)
         )
-        return JSONResponse(status_code=200, content={"success": True})
     except Exception as e:
-        raise APIException(406, f"User with username '{username}' does not exist")
+        raise APIException(406, f"User with id '{id}' does not exist")
+
+    # Success
+    return models.User.from_record(
+        await database.fetch_one(models.users.select().where(models.User.id == id))
+    )
 
 
 @app.delete(
-    "/users/{username}",
+    "/users/{id}",
     dependencies=[
         Depends(verify_token_admin),
     ],
     response_model=schemas.Response,
 )
-async def delete_user(username: str):
+async def delete_user(id: int):
     try:
         models.User.from_record(
-            await database.fetch_one(
-                models.users.select().where(models.User.username == username)
-            )
+            await database.fetch_one(models.users.select().where(models.User.id == id))
         )
-        await database.execute(
-            models.users.delete().where(models.User.username == username)
-        )
-        return JSONResponse(status_code=200, content={"success": True})
+        await database.execute(models.users.delete().where(models.User.id == id))
+        return JSONResponse(status_code=200, content={"detail": "success"})
     except Exception as e:
-        raise APIException(406, f"User with username '{username}' does not exist")
+        raise APIException(406, f"User with id '{id}' does not exist")
