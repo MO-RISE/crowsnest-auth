@@ -4,7 +4,7 @@ import pytest
 import requests
 import psycopg2
 from sqlalchemy import create_engine
-from app.models import User, users
+from backend.models import User, users
 from passlib.context import CryptContext
 
 import logging
@@ -39,7 +39,7 @@ def compose(docker_ip, docker_services):
     uris = {
         "postgres": f"postgresql://admin:password@{docker_ip}:{docker_services.port_for('database',5432)}/users",
         "auth": f"http://{docker_ip}/auth",
-        "whoami": f"http://{docker_ip}/whoami",
+        "admin": f"http://{docker_ip}/admin",
         "black": f"http://{docker_ip}/black",
         "white": f"http://{docker_ip}/white",
     }
@@ -51,7 +51,7 @@ def compose(docker_ip, docker_services):
 
     try:
         docker_services.wait_until_responsive(
-            timeout=5.0, pause=0.2, check=lambda: is_responsive(uris["whoami"])
+            timeout=5.0, pause=0.2, check=lambda: is_responsive(uris["admin"])
         )
     except Exception as ex:
         logging.error(ex)

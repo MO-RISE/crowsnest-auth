@@ -24,8 +24,8 @@ import {
 
 const validateNames = [required(), minLength(2), maxLength(15)];
 const validateEmail = [required(),email()];
-const validatePath = regex(/([,]*\/[a-z0-9\/]+)+/, 'Must be a valid path');
-const validateTopic = regex(/([,]*\/[a-z0-9$\*\/]+)+/, 'Must be a valid path');
+const validatePath = regex(/([,]*\/[a-z0-9/]+)+/, 'Must be a valid path');
+const validateTopic = regex(/([,]*\/[a-z0-9$*/]+)+/, 'Must be a valid path');
 const validatePassword = [required(), minLength(5)] 
 const validateNewPassword = [minLength(5)]
 

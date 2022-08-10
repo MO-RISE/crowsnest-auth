@@ -1,29 +1,29 @@
 import requests
 import json
-from app.models import User, users
+from backend.models import User, users
 
 
 def test_redirect(compose):
 
-    # The client is redirected when requesting a protected resouce without providing a bearer token through a
+    # The client is redirected when requesting a protected resource without providing a bearer token through a
     # cookie or header ...
-    response = requests.get(compose["whoami"])
+    response = requests.get(compose["admin"])
     assert response.status_code == 200
     assert response.history[0].status_code == 307
 
     # ... or when providing an invalid bearer token in a cookie ....
     response = requests.get(
-        compose["whoami"], cookies={"crowsnest-auth-access": "bad_token"}
+        compose["admin"], cookies={"crowsnest-auth-access": "bad_token"}
     )
     assert response.status_code == 200
     assert response.history[0].status_code == 307
 
-    # ... but providing an invalid bearer token in a header does not redirects the client
+    # ... or in a Authorization header
     response = requests.get(
-        compose["whoami"], headers={"Authorization": "Bearer bad_token"}
+        compose["admin"], headers={"Authorization": "Bearer bad_token"}
     )
-    assert response.status_code == 401
-    assert len(response.history) == 0
+    assert response.status_code == 200
+    assert response.history[0].status_code == 307
 
 
 def test_api_login(compose):
@@ -44,22 +44,18 @@ def test_api_login(compose):
     # ... returns a status code 200:OK ...
     assert response.status_code == 200
 
-    # ... and returns a cookie containing the bearer token ...
+    # ... and returns a cookie containing the bearer token
     cookies = response.cookies
     assert "crowsnest-auth-access" in cookies.get_dict()
 
-    # ... as well as the bearer token in plain-text ...
-    token = json.loads(response.text)
-    assert "token" in token
-
     # Protected resources are accessible by with the cookie ...
-    response = requests.get(compose["whoami"], cookies=cookies)
+    response = requests.get(compose["admin"], cookies=cookies)
     assert response.status_code == 200
     assert len(response.history) == 0
 
     # ... or by providing the bearer token in the request headers
     response = requests.get(
-        compose["whoami"],
+        compose["admin"],
         headers={
             "Authorization": f"Bearer {cookies.get_dict()['crowsnest-auth-access']}",
         },
@@ -76,43 +72,52 @@ def test_api_verify(compose, make_dummy_user, set_dummy_user_fields):
         {"username": "dummy_user", "password": "password"},
     )
     assert response.status_code == 200
-    headers = {
-        "Authorization": f"Bearer {response.cookies.get_dict()['crowsnest-auth-access']}",
-    }
+    cookies = response.cookies
+    # headers = {
+    #    "Authorization": f"Bearer {response.cookies.get_dict()['crowsnest-auth-access']}",
+    # }
 
-    # Add path whitelist to 'dummy_user'
-    set_dummy_user_fields(path_whitelist=["/white"], path_blacklist=None)
+    # Dummy can access 'white' and 'black'
+    response = requests.get(compose["white"], cookies=cookies)
+    assert response.status_code == 200
+    assert len(response.history) == 0
+    response = requests.get(compose["black"], cookies=cookies)
+    assert response.status_code == 200
+    assert len(response.history) == 0
 
-    # Dummy can only access protected resource 'white' because its the only
-    # whitelisted resource
-    request = requests.get(compose["white"], headers=headers)
-    assert request.status_code == 200
-    request = requests.get(compose["black"], headers=headers)
-    assert request.status_code == 401
-    request = requests.get(compose["whoami"], headers=headers)
-    assert request.status_code == 401
+    # Add 'white' to path whitelist to 'dummy_user' ...
+    set_dummy_user_fields(path_whitelist="/white", path_blacklist=None)
+
+    # ... and 'dummy_user' can access 'white' but not 'black'
+    response = requests.get(compose["white"], cookies=cookies)
+    assert response.status_code == 200
+    assert len(response.history) == 0
+    response = requests.get(compose["black"], cookies=cookies)
+    assert response.status_code == 200
+    assert len(response.history) != 0
+    assert response.history[0].status_code == 307
+
+    # Add 'white' to path blacklist to 'dummy_user' ...
+    set_dummy_user_fields(path_blacklist="/white", path_whitelist=None)
+
+    # ... and 'dummy_user' can access 'black' but not 'white'
+    response = requests.get(compose["black"], cookies=cookies)
+    assert response.status_code == 200
+    assert len(response.history) == 0
+    response = requests.get(compose["white"], cookies=cookies)
+    assert response.status_code == 200
+    assert len(response.history) != 0
+    assert response.history[0].status_code == 307
 
     # Dummy user has 'admin' set to false, so it cannot access protected
     # resources with 'admin' in the uri
-    # request = requests.get(compose["auth"] + "/auth/admin", headers=headers)
-    # assert request.status_code == 401
-    # assert "Unauthorized access" in request.text
+    response = requests.get(compose["admin"], cookies=cookies)
+    assert response.status_code == 200
+    assert response.history[0].status_code == 307
 
-    # Add path blacklist to 'dummy_user'
-    set_dummy_user_fields(path_whitelist=None, path_blacklist=["/black"])
 
-    # Dummy can access all protected resources except 'black' because its the only
-    # blacklisted resource
-    request = requests.get(compose["white"], headers=headers)
-    assert request.status_code == 200
-    request = requests.get(compose["black"], headers=headers)
-    assert request.status_code == 401
-    request = requests.get(compose["whoami"], headers=headers)
-    assert request.status_code == 200
+# def test_verify_emqx(compose):
 
-def test_verify_emqx(compose):
-
-    
 
 """
 

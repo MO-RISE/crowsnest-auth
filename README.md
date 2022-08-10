@@ -55,7 +55,7 @@ npm install frontend
 
    ```cmd
    export $(xargs < .env)
-   uvicorn app.main:app --reload --port 8000
+   uvicorn backend.main:app --reload --port 8000
    ```
 
    c. Start the React development server:

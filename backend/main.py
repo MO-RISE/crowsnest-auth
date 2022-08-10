@@ -192,30 +192,6 @@ async def startup():
         )
         await database.execute(query)
 
-    # Create dummy user
-    query = users.select().where(User.username == "dummy")
-    dummy: User = await database.fetch_one(query)
-
-    hashed_password = pwd_context.hash("password")
-    if dummy:
-        query = (
-            users.update()
-            .where(User.username == "dummy")
-            .values(hashed_password=hashed_password)
-        )
-        await database.execute(query)
-    else:
-        query = users.insert().values(
-            username="dummy",
-            firstname="Dummy",
-            lastname="dasdas",
-            email="gandalf@lotr.com",
-            admin=False,
-            hashed_password=hashed_password,
-            path_whitelist="/white",
-        )
-        await database.execute(query)
-
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -413,7 +389,8 @@ async def verify_request(
         raise VerifyException(message)
 
     # Limit access to non-administrators
-    if "admin" in uri and not user["admin"]:
+    if "admin" in uri and not user.admin:
+        print(f"The user {user.admin}")
         raise VerifyException(f"Unauthorized access")
 
     # Access Control List checks
@@ -423,7 +400,7 @@ async def verify_request(
             if re.match(path, uri):
                 accepted = True
         if not accepted:
-            raise VerifyException("Unauthorized access to {uri}")
+            raise VerifyException(f"Unauthorized access to {uri}")
 
     if user.path_blacklist:
         accepted = True
@@ -432,7 +409,7 @@ async def verify_request(
                 accepted = False
 
         if not accepted:
-            raise VerifyException("Unauthorized access to {uri}")
+            raise VerifyException(f"Unauthorized access to {uri}")
 
     return JSONResponse(status_code=200, content={"success": True})
 
@@ -523,6 +500,10 @@ async def create_user(user: schemas.CreateUser):
                 email=user.lastname,
                 admin=user.admin,
                 hashed_password=hashed_password,
+                path_whitelist=user.path_whitelist,
+                path_blacklist=user.path_blacklist,
+                topic_whitelist=user.topic_whitelist,
+                topic_blacklist=user.topic_blacklist,
             )
         )
         return JSONResponse(status_code=200, content={"success": True})

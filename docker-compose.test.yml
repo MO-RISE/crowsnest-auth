@@ -15,11 +15,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
-  whoami:
+  admin:
     image: containous/whoami:latest
     labels:
-      - traefik.http.routers.whoami.rule=Path(`/whoami`)
-      - traefik.http.routers.whoami.middlewares=crowsnest-auth
+      - traefik.http.routers.admin.rule=Path(`/admin`)
+      - traefik.http.routers.admin.middlewares=crowsnest-auth
 
   white:
     image: containous/whoami:latest
@@ -74,11 +74,15 @@ services:
 
   emqx:
     image: emqx/emqx:4.4.4
-    labels:
-      - "traefik.http.routers.emqx-ws.rule=PathPrefix(`/mqtt`)"
-      - "traefik.http.routers.emqx-ws.entryPoints=web"
-      - "traefik.http.routers.emqx-ws.service=emqx-ws-service"
-      - "traefik.http.services.emqx-ws-service.loadbalancer.server.port=8083"
+    ports:
+      - 1883:1883
+      - 8083:8083
+      - 8001:18083
+    #labels:
+    #  - "traefik.http.routers.emqx-ws.rule=PathPrefix(`/mqtt`)"
+    #  - "traefik.http.routers.emqx-ws.entryPoints=web"
+    #  - "traefik.http.routers.emqx-ws.service=emqx-ws-service"
+    #  - "traefik.http.services.emqx-ws-service.loadbalancer.server.port=18083"
     environment:
       - EMQX_NAME=foo-emqx
       - EMQX_LOG__LEVEL=debug

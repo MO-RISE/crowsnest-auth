@@ -14,13 +14,17 @@ import UserIcon from '@mui/icons-material/Group';
 
 
 
+
 const dataProvider = jsonServerProvider('http://localhost/auth/api');
 
-const ReactAdmin = () => (
-      <Admin  basename="/admin" loginPage={<LoginPage admin />} dataProvider={dataProvider} authProvider={authProvider}>
-          <Resource name="users" list={UserList} edit={UserEdit} create={UserCreate} icon={UserIcon}/>
-      </Admin>
-  );
+const ReactAdmin = () => {
+
+  return (
+    <Admin basename="/admin" loginPage={<LoginPage admin />} dataProvider={dataProvider} authProvider={authProvider} requireAuth>
+      <Resource name="users" list={UserList} edit={UserEdit} create={UserCreate} icon={UserIcon}/> : null
+    </Admin>
+  )
+};
 
 
 const App = () => (
