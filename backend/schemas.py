@@ -2,7 +2,7 @@
 Schemas
 """
 # pylint: disable=no-name-in-module, too-few-public-methods, missing-class-docstring,
-# pylint: disable=missing-function-docstring, no-self-use, no-self-argument, use-a-generator
+# pylint: disable=missing-function-docstring, no-self-argument, use-a-generator
 from typing import Optional
 from pydantic import BaseModel, root_validator
 
