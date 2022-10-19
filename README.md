@@ -70,8 +70,8 @@ The API's documentation is available at `http://localhost/auth/api/docs`
 ### Run linters
 
 ```cmd
-black app tests
-pylint app
+black backend tests
+pylint backend
 ```
 
 ### Run testsuite

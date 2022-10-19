@@ -1,5 +1,7 @@
 # python3.6
 
+"""
+
 import random
 import time
 
@@ -48,3 +50,5 @@ def subscribe(client: mqtt_client):
 
     client.subscribe(topic)
     client.on_message = on_message
+
+"""

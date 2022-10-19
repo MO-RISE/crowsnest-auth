@@ -1,31 +1,30 @@
 """Crow's Nest Auth microservice"""
 import os
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 from datetime import datetime, timedelta
 import re
 from urllib import parse
 from typing import List
 
-from fastapi import FastAPI, Depends, Request, Response, HTTPException
+from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from jose import jwt
 from jose.exceptions import JWTError, ExpiredSignatureError, JWTClaimsError
 from passlib.context import CryptContext
 from environs import Env
 from databases import Database
-from sqlalchemy import JSON, create_engine, text
+from sqlalchemy import create_engine, text
 from starlette.responses import RedirectResponse
 
-# pylint: disable=import-error, relative-beyond-top-level
-from .models import users, User, Base
+# pylint: disable=import-error, relative-beyond-top-level, no-name-in-module
+from . import schemas
 from . import models
-from . import schemas
 from .oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
-from .utils import mqtt_match
-from . import schemas
+
+# from .utils import mqtt_match
 from .exceptions import VerifyException, APIException
 
 LOGGER = logging.getLogger(__name__)
@@ -124,22 +123,22 @@ async def get_claims_from_bearer_token(
 
 
 async def get_user_from_bearer_token(
-    claims_tuple: Tuple[User, str] = Depends(get_claims_from_bearer_token),
-) -> Tuple[User, str]:
+    claims_tuple: Tuple[models.User, str] = Depends(get_claims_from_bearer_token),
+) -> Tuple[models.User, str]:
     """Get User instance from bearer token"""
     claims, message = claims_tuple
     user = None
     if claims is not None:
         try:
-            query = users.select().where(User.username == claims["sub"])
-            user = User.from_record(await database.fetch_one(query))
+            query = models.users.select().where(models.User.username == claims["sub"])
+            user = models.User.from_record(await database.fetch_one(query))
         except:
             message = "User does not exist"
     return user, message
 
 
 async def verify_token(
-    user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token)
+    user_tuple: Tuple[models.User, str] = Depends(get_user_from_bearer_token)
 ):
     """Verify that the client provides a valid token"""
     user, message = user_tuple
@@ -148,9 +147,10 @@ async def verify_token(
 
 
 async def verify_token_admin(
-    user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token)
+    user_tuple: Tuple[models.User, str] = Depends(get_user_from_bearer_token)
 ):
-    """Verify that the client provides a valid token and that the corresponding user is an administrator"""
+    """Verify that the client provides a valid token and that the corresponding
+    user is an administrator"""
     user, message = user_tuple
     if not user:
         raise APIException(401, message)
@@ -164,25 +164,25 @@ async def startup():
     """Run during startup of this application"""
 
     # Database initial setup using sqlalchemy
-    Base.metadata.create_all(create_engine(USER_DATABASE_URL))
+    models.Base.metadata.create_all(create_engine(USER_DATABASE_URL))
 
     # Connect with actual connection we will use from here on forwards
     await database.connect()
 
     # Create admin user
-    query = users.select().where(User.username == ADMIN_USER_USERNAME)
-    admin_user: User = await database.fetch_one(query)
+    query = models.users.select().where(models.User.username == ADMIN_USER_USERNAME)
+    admin_user: models.User = await database.fetch_one(query)
 
     hashed_password = pwd_context.hash(ADMIN_USER_PASSWORD)
     if admin_user:
         query = (
-            users.update()
-            .where(User.username == ADMIN_USER_USERNAME)
+            models.users.update()
+            .where(models.User.username == ADMIN_USER_USERNAME)
             .values(hashed_password=hashed_password)
         )
         await database.execute(query)
     else:
-        query = users.insert().values(
+        query = models.users.insert().values(
             username=ADMIN_USER_USERNAME,
             firstname="Gandalf",
             lastname="The Grey",
@@ -202,7 +202,7 @@ async def shutdown():
 ## JWT utility functions ##
 
 
-def create_jwt_token(user: User, exp: timedelta = None) -> str:
+def create_jwt_token(user: models.User, exp: timedelta = None) -> str:
     """Create a JSON Web Token (JWT) string from a User instance
 
     Args:
@@ -276,7 +276,7 @@ async def get_credentials(
     }
 
 
-async def get_user_from_claims(claims: Dict) -> User:
+async def get_user_from_claims(claims: Dict) -> models.User:
     """Fetch the User from the user database using the information provided in
     the decoded claims from a JWT token
 
@@ -287,8 +287,8 @@ async def get_user_from_claims(claims: Dict) -> User:
         User: A user instance
     """
     username = claims.get("sub")
-    query = users.select().where(User.username == username)
-    return User.from_record(await database.fetch_one(query))
+    query = models.users.select().where(models.User.username == username)
+    return models.User.from_record(await database.fetch_one(query))
 
 
 # *** Routes ****
@@ -302,11 +302,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     password: str = form_data.password
 
     # Query database
-    query = users.select().where(User.username == username)
+    query = models.users.select().where(models.User.username == username)
     record = await database.fetch_one(query)
     if not record:
         raise HTTPException(status_code=401, detail="Wrong username or password")
-    user = User.from_record(record)
+    user = models.User.from_record(record)
 
     # Compare credentials
     if not pwd_context.verify(password, user.hashed_password):
@@ -353,7 +353,9 @@ async def logout():
     response_model=schemas.UserOut,
     dependencies=[Depends(verify_token)],
 )
-async def get_me(user_tuple: Tuple[User, str] = Depends(get_user_from_bearer_token)):
+async def get_me(
+    user_tuple: Tuple[models.User, str] = Depends(get_user_from_bearer_token)
+):
     """Get the details of the current user"""
     user, _ = user_tuple
     return user
@@ -414,40 +416,40 @@ async def verify_request(
     return JSONResponse(status_code=200, content={"success": True})
 
 
-@app.get("/verify_emqx")
-async def verify_emqx(
-    username: str,
-    topic: str,
-):
-    """Authenticate and authorize a request according to EMQX HTTP ACL plugin"""
-    query = users.select().where(User.username == username)
-    record = await database.fetch_one(query)
-    if not record:
-        raise HTTPException(403, "Access not allowed")
+# @app.get("/verify_emqx")
+# async def verify_emqx(
+#     username: str,
+#     topic: str,
+# ):
+#     """Authenticate and authorize a request according to EMQX HTTP ACL plugin"""
+#     query = models.users.select().where(models.User.username == username)
+#     record = await database.fetch_one(query)
+#     if not record:
+#         raise HTTPException(403, "Access not allowed")
 
-    user = User.from_record(record)
+#     user = models.User.from_record(record)
 
-    # ACL checks
-    if patterns := user.topic_whitelist:
-        accepted = False
-        for pattern in patterns:
-            if mqtt_match(pattern, topic):
-                accepted = True
+#     # ACL checks
+#     if patterns := user.topic_whitelist:
+#         accepted = False
+#         for pattern in patterns:
+#             if mqtt_match(pattern, topic):
+#                 accepted = True
 
-        if not accepted:
-            raise HTTPException(403, f"Access is not allowed to {topic}")
+#         if not accepted:
+#             raise HTTPException(403, f"Access is not allowed to {topic}")
 
-    if patterns := user.topic_blacklist:
-        accepted = True
-        for pattern in patterns:
-            if mqtt_match(pattern, topic):
-                accepted = False
+#     if patterns := user.topic_blacklist:
+#         accepted = True
+#         for pattern in patterns:
+#             if mqtt_match(pattern, topic):
+#                 accepted = False
 
-        if not accepted:
-            raise HTTPException(403, f"Access is not allowed to {topic}")
+#         if not accepted:
+#             raise HTTPException(403, f"Access is not allowed to {topic}")
 
-    # Accepted!
-    return JSONResponse("Authorized")
+#     # Accepted!
+#     return JSONResponse("Authorized")
 
 
 @app.get(
