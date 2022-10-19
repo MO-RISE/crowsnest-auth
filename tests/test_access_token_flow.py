@@ -28,13 +28,21 @@ def test_redirect(compose):
 
 def test_api_login(compose):
 
-    # A login request with wrong credentials ...
+    # A login request with non-existing username ...
+    response = requests.post(
+        compose["auth"] + "/api/login", {"username": "foo", "password": "foo"}
+    )
+
+    # ... returns a status code HTTPError:401 Unauthorized
+    assert response.status_code == 401
+
+    # A login request with wrong password ...
     response = requests.post(
         compose["auth"] + "/api/login", {"username": "admin", "password": "foo"}
     )
 
-    # ... returns a status code HTTPError:400
-    assert response.status_code == 400
+    # ... returns a status code HTTPError:401 Unauthorized
+    assert response.status_code == 401
 
     # A login request with the right credentials ...
     response = requests.post(
@@ -73,9 +81,6 @@ def test_api_verify(compose, make_dummy_user, set_dummy_user_fields):
     )
     assert response.status_code == 200
     cookies = response.cookies
-    # headers = {
-    #    "Authorization": f"Bearer {response.cookies.get_dict()['crowsnest-auth-access']}",
-    # }
 
     # Dummy can access 'white' and 'black'
     response = requests.get(compose["white"], cookies=cookies)

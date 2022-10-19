@@ -1,11 +1,10 @@
 """Crow's Nest Auth microservice"""
 import os
 import logging
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 from datetime import datetime, timedelta
 import re
 from urllib import parse
-from typing import List
 
 from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -75,12 +74,14 @@ app.add_middleware(
 
 
 @app.exception_handler(APIException)
-async def api_exception_handler(request: Request, exc: APIException):
+async def api_exception_handler(exc: APIException):
+    """Handle custom API exception"""
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
 @app.exception_handler(VerifyException)
 async def redirect_or_exception_handler(request: Request, exc: VerifyException):
+    """Handle redirect or exception"""
     uri = request.headers.get("X-Forwarded-Uri", "")
     host = request.headers.get("X-Forwarded-Host", "")
 
@@ -122,6 +123,7 @@ async def get_claims_from_bearer_token(
     return claims, message
 
 
+# pylint: disable=broad-except
 async def get_user_from_bearer_token(
     claims_tuple: Tuple[models.User, str] = Depends(get_claims_from_bearer_token),
 ) -> Tuple[models.User, str]:
@@ -132,9 +134,12 @@ async def get_user_from_bearer_token(
         try:
             query = models.users.select().where(models.User.username == claims["sub"])
             user = models.User.from_record(await database.fetch_one(query))
-        except:
-            message = "User does not exist"
+        except Exception:
+            pass
     return user, message
+
+
+# pylint: enable=broad-except
 
 
 async def verify_token(
@@ -154,9 +159,8 @@ async def verify_token_admin(
     user, message = user_tuple
     if not user:
         raise APIException(401, message)
-    else:
-        if not user.admin:
-            raise APIException(401, "Unauthorized access")
+    if not user.admin:
+        raise APIException(401, "Unauthorized access")
 
 
 @app.on_event("startup")
@@ -184,9 +188,9 @@ async def startup():
     else:
         query = models.users.insert().values(
             username=ADMIN_USER_USERNAME,
-            firstname="Gandalf",
-            lastname="The Grey",
-            email="gandalf@lotr.com",
+            firstname="Administrator",
+            lastname="Administratorsson",
+            email="admin@crowsnest.mo.ri.se",
             admin=True,
             hashed_password=hashed_password,
         )
@@ -220,12 +224,6 @@ def create_jwt_token(user: models.User, exp: timedelta = None) -> str:
 
     if exp:
         claims.update({"exp": now + exp})
-
-    # Add path whitelist/blacklist and topic whitelist/blacklist
-    # if user.path_whitelist:
-    #    claims.update({"path_whitelist": user.path_whitelist})
-    # if user.path_blacklist:
-    #    claims.update({"path_blacklist": user.path_blacklist})
 
     return jwt.encode(claims, JWT_TOKEN_SECRET, algorithm="HS256")
 
@@ -305,12 +303,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     query = models.users.select().where(models.User.username == username)
     record = await database.fetch_one(query)
     if not record:
-        raise HTTPException(status_code=401, detail="Wrong username or password")
+        raise HTTPException(status_code=401, detail="Wrong username or password.")
     user = models.User.from_record(record)
 
     # Compare credentials
     if not pwd_context.verify(password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Wrong username or password.")
+        raise HTTPException(status_code=401, detail="Wrong username or password.")
 
     # Create token
     jwt_token: str = create_jwt_token(
@@ -393,7 +391,7 @@ async def verify_request(
     # Limit access to non-administrators
     if "admin" in uri and not user.admin:
         print(f"The user {user.admin}")
-        raise VerifyException(f"Unauthorized access")
+        raise VerifyException("Unauthorized access")
 
     # Access Control List checks
     if user.path_whitelist:
@@ -458,6 +456,8 @@ async def verify_request(
     dependencies=[Depends(verify_token_admin)],
 )
 async def get_all_users(_end: int, _order: str, _sort: str, _start: int):
+    """Get JSON Response with a list of all users in the database and
+    a header continaing the total count."""
     query = (
         models.users.select().order_by(text(f"{_sort} {_order}")).slice(_start, _end)
     )
@@ -471,17 +471,18 @@ async def get_all_users(_end: int, _order: str, _sort: str, _start: int):
 
 
 @app.get(
-    "/users/{id}",
+    "/users/{idx}",
     response_model=schemas.UserOut,
     dependencies=[Depends(verify_token_admin)],
 )
-async def get_user_by_id(id: int):
+async def get_user_by_id(idx: int):
+    """Get user by its Id"""
     try:
         return models.User.from_record(
-            await database.fetch_one(models.users.select().where(models.User.id == id))
+            await database.fetch_one(models.users.select().where(models.User.id == idx))
         )
-    except Exception as e:
-        raise APIException(406, str(e))
+    except Exception as exc:
+        raise APIException(406, str(exc)) from exc
 
 
 @app.post(
@@ -489,6 +490,7 @@ async def get_user_by_id(id: int):
     dependencies=[Depends(verify_token_admin)],
 )
 async def create_user(user: schemas.CreateUser):
+    """Create user"""
     hashed_password = pwd_context.hash(user.password)
     print("Create user")
     print(user)
@@ -509,10 +511,10 @@ async def create_user(user: schemas.CreateUser):
             )
         )
         return JSONResponse(status_code=200, content={"success": True})
-    except Exception as e:
+    except Exception as exc:
         raise APIException(
             406, f"User with username '{user.username.lower()}' already exists"
-        )
+        ) from exc
 
 
 @app.put(
@@ -520,9 +522,8 @@ async def create_user(user: schemas.CreateUser):
     response_model=schemas.UserOut,
     dependencies=[Depends(verify_token_admin)],
 )
-async def modify_user(id: int, modifications: schemas.ModifyUser):
-    print("asd")
-    print(modifications.__dict__)
+async def modify_user(idx: int, modifications: schemas.ModifyUser):
+    """Modify user"""
     mods = {k: v for k, v in modifications.__dict__.items() if v is not None}
     # If provided, hash the password
     if "password" in mods:
@@ -530,7 +531,6 @@ async def modify_user(id: int, modifications: schemas.ModifyUser):
         del mods["password"]
 
     # Validate the paths_text_string
-    print(mods)
     for key in [
         "path_whitelist",
         "path_blacklist",
@@ -544,30 +544,31 @@ async def modify_user(id: int, modifications: schemas.ModifyUser):
     # Update user in the database
     try:
         await database.execute(
-            models.users.update().where(models.User.id == id).values(**mods)
+            models.users.update().where(models.User.id == idx).values(**mods)
         )
-    except Exception as e:
-        raise APIException(406, f"User with id '{id}' does not exist")
+    except Exception as exc:
+        raise APIException(406, f"User with id '{idx}' does not exist") from exc
 
     # Success
     return models.User.from_record(
-        await database.fetch_one(models.users.select().where(models.User.id == id))
+        await database.fetch_one(models.users.select().where(models.User.id == idx))
     )
 
 
 @app.delete(
-    "/users/{id}",
+    "/users/{idx}",
     dependencies=[
         Depends(verify_token_admin),
     ],
     response_model=schemas.Response,
 )
-async def delete_user(id: int):
+async def delete_user(idx: int):
+    """Delete user"""
     try:
         models.User.from_record(
-            await database.fetch_one(models.users.select().where(models.User.id == id))
+            await database.fetch_one(models.users.select().where(models.User.id == idx))
         )
-        await database.execute(models.users.delete().where(models.User.id == id))
+        await database.execute(models.users.delete().where(models.User.id == idx))
         return JSONResponse(status_code=200, content={"detail": "success"})
-    except Exception as e:
-        raise APIException(406, f"User with id '{id}' does not exist")
+    except Exception as exc:
+        raise APIException(406, f"User with id '{idx}' does not exist") from exc

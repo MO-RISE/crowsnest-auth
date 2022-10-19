@@ -1,7 +1,6 @@
 """SQLAlchemy ORM models"""
 
-from sqlalchemy import Column, BigInteger, String, Boolean, text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import Column, BigInteger, String, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from databases.backends.postgres import Record
 
@@ -36,10 +35,11 @@ class User(Base):  # pylint: disable=missing-class-docstring,too-few-public-meth
         return cls(**dict(record))
 
     def to_dict(self):
-        d = {}
+        """Transform to dictionary"""
+        dictionary = {}
         for column in self.__table__.columns:
-            d[column.name] = getattr(self, column.name)
-        return d
+            dictionary[column.name] = getattr(self, column.name)
+        return dictionary
 
 
 users = User.__table__
