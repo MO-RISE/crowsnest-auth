@@ -1,4 +1,4 @@
-from app.utils import mqtt_match
+from backend.utils import mqtt_match
 
 
 def test_mqtt_topic_match():

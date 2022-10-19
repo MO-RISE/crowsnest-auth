@@ -6,36 +6,43 @@ services:
     command:
       - "--log.level=DEBUG"
       - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:7000"
-      - "--entrypoints.mqtt.address=:7001"
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.file.filename=/dev-service-config.yml"
+      - "--providers.docker.exposedbydefault=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web-secure.address=:443"
+      - "--entrypoints.mqtt.address=:1883"
+      - "--entrypoints.traefik-dashboard.address=:8080"
+
     ports:
-      - 7000:7000
-      - 7001:7001
+      - 80:80
+      - 443:443
+      - 1883:1883
+
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./dev-service-config.yml:/dev-service-config.yml"
 
-  crowsnest-auth:
-    build: .
+  http_microservice:
+    image: containous/whoami:latest
+    
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.crowsnest-auth.rule=PathPrefix(`/auth`)
-      - traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth
-      - traefik.http.routers.crowsnest-auth.middlewares=auth-strip
-      - traefik.http.middlewares.crowsnest-auth.forwardauth.address=http://crowsnest-auth/verify
-      - traefik.http.middlewares.crowsnest-auth.forwardauth.trustForwardHeader=true
-    ports:
-      - 7002:80
-    environment:
-      - USER_DATABASE_URL=postgresql://test:test@postgres/test
-    depends_on:
-      - postgres
-    restart: unless-stopped
-
+      - traefik.http.routers.http_example.rule=Path(`/whoami`)
+      - traefik.http.routers.http_example.middlewares=forward-auth@file
+  
+  database:
+     image: "postgres:14.0-alpine"
+     ports:
+      - 5432:5432
+     environment:
+       - POSTGRES_USER=admin
+       - POSTGRES_PASSWORD=password
+       - POSTGRES_DB=users
+ 
   emqx:
-    image: emqx/emqx
+    image: emqx/emqx:4.4.4
     ports:
-      - 1883:1883
       - 8083:8083
       - 8001:18083
     environment:
@@ -49,20 +56,5 @@ services:
       - EMQX_AUTH__HTTP__ACL_REQ__METHOD=get
       - EMQX_AUTH__HTTP__ACL_REQ__PARAMS=username=%u,topic=%t
 
-  http_microservice:
-    image: containous/whoami:latest
-    ports:
-      - 7003:80
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.http_example.rule=PathPrefix(`/whoami`)"
-      - "traefik.http.routers.http_example.middlewares=crowsnest-auth"
 
-  postgres:
-    image: "postgres"
-    ports:
-      - 50432:5432
-    environment:
-      - POSTGRES_USER=test
-      - POSTGRES_PASSWORD=test
-      - POSTGRES_DB=test
+    

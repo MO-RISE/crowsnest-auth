@@ -5,3 +5,4 @@ pytest-docker
 pytest-dotenv
 pytest-pythonpath
 paho-mqtt
+requests
