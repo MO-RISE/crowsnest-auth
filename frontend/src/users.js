@@ -31,6 +31,7 @@ const validateNewPassword = [minLength(5)]
 
 // Fix for null values
 // Source: https://github.com/marmelab/react-admin/issues/7782#issuecomment-1163234000
+/*
 const NullableTextInput = ({format = (value) => value, parse = (input) => input, ...props}) => (
     <TextInput 
         {...props} 
@@ -46,6 +47,24 @@ const NullablePasswordInput = ({format = (value) => value, parse = (input) => in
         parse={(input) => parse(input === '' ? null : input)} 
     />
 )
+*/
+
+const NullableTextInput = (props) => (
+    <TextInput 
+        {...props} 
+        format={(value) => value === null ? '' : value} 
+        parse={(input) => input === null ? '' : input} 
+    />
+)
+
+const NullablePasswordInput = (props) => (
+    <PasswordInput 
+        {...props} 
+        format={(value) => value === null ? '' : value} 
+        parse={(input) => input === '' ? null : input} 
+    />
+)
+
 const UserTitle = () => {
         const record = useRecordContext();
         return <span>User: {record ? `"${record.firstname} ${record.lastname}"` : ''}</span>;

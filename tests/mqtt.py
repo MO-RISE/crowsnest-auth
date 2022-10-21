@@ -1,7 +1,5 @@
 # python3.6
-
 """
-
 import random
 import time
 
@@ -9,7 +7,7 @@ from paho.mqtt import client as mqtt_client
 
 
 broker = "localhost"
-port = 1883
+port = 80
 topic = "python/mqtt"
 # generate client ID with pub prefix randomly
 client_id = f"python-mqtt-{random.randint(0, 100)}"
@@ -22,7 +20,7 @@ def connect_mqtt(username, password) -> mqtt_client:
         else:
             print("Failed to connect, return code %d\n", rc)
 
-    client = mqtt_client.Client(client_id)
+    client = mqtt_client.Client(client_id, transport="websockets")
     client.username_pw_set(username, password)
     client.on_connect = on_connect
     client.connect(broker, port)
@@ -50,5 +48,4 @@ def subscribe(client: mqtt_client):
 
     client.subscribe(topic)
     client.on_message = on_message
-
 """

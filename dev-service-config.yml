@@ -7,7 +7,7 @@ http:
       #rule: "Path(`/auth`,'/auth/')"
 
     to-auth:
-      service: auth
+      service: crowsnest-auth
       middlewares:
         - "auth-api-strip"
       rule: "Path(`/auth/api/{case:[a-z0-9/]+}`)"
@@ -28,7 +28,7 @@ http:
       loadBalancer:
         servers:
           - url: "http://host.docker.internal:3000"
-    auth:
+    crowsnest-auth:
       loadBalancer:
         servers:
           - url: "http://host.docker.internal:8000"
