@@ -1,10 +1,12 @@
 
 import {login} from './login'
 
+const protocol = window.location.hostname === 'localhost' ? 'http://' : 'https://'
+
 const authProvider = {
     login: login,
     logout: () => {
-        const request = new Request('http://' + window.location.hostname + '/auth/api/logout', {
+        const request = new Request(protocol + window.location.hostname + '/auth/api/logout', {
             method: 'POST',
             credentials: 'include',
         });
@@ -13,7 +15,7 @@ const authProvider = {
         })
     },
     checkAuth: () => {
-        const request = new Request('http://' + window.location.hostname + '/auth/api/me', {
+        const request = new Request(protocol + window.location.hostname + '/auth/api/me', {
             method: 'GET',
             credentials: 'include',
         })
@@ -40,7 +42,7 @@ const authProvider = {
         return Promise.resolve();
     },
     getIdentity: () => {
-        const request = new Request('http://' + window.location.hostname + '/auth/api/me', {
+        const request = new Request(protocol + window.location.hostname + '/auth/api/me', {
             method: 'GET',
             credentials: 'include',
         })

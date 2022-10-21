@@ -14,9 +14,8 @@ import UserIcon from '@mui/icons-material/Group';
 
 
 
-
-const dataProvider = jsonServerProvider('http://' +  window.location.hostname + '/auth/api');
-//const dataProvider = jsonServerProvider('/asdf/api');
+const protocol = window.location.hostname === 'localhost' ? 'http://' : 'https://'
+const dataProvider = jsonServerProvider(protocol +  window.location.hostname + '/auth/api');
 
 
 const ReactAdmin = () => {
