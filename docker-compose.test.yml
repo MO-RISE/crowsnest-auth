@@ -42,7 +42,7 @@ services:
       context: ./
       dockerfile: Dockerfile-backend
     labels:
-      - traefik.http.routers.crowsnest-auth.rule=Path(`/auth/api/{case:[\/_a-z]+}`)
+      - traefik.http.routers.crowsnest-auth.rule=Path(`/auth/api/{case:[\/_a-z0-9]+}`)
       - traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth/api
       - traefik.http.routers.crowsnest-auth.middlewares=auth-strip
       - traefik.http.middlewares.crowsnest-auth.forwardauth.address=http://crowsnest-auth/verify
