@@ -1,5 +1,5 @@
 """Crow's Nest Auth microservice"""
-import os
+
 import logging
 from typing import Dict, Tuple, List
 from datetime import datetime, timedelta
@@ -22,9 +22,10 @@ from starlette.responses import RedirectResponse
 from . import schemas
 from . import models
 from .oauth2_password_bearer_cookie import OAuth2PasswordBearerOrCookie
+from .utils import mqtt_match
 
 # from .utils import mqtt_match
-from .exceptions import VerifyException, APIException
+from .exceptions import VerifyException
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ ACCESS_COOKIE_SAMESITE = env(
 )
 ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
 
-JWT_TOKEN_SECRET = env("JWT_TOKEN_SECRET", os.urandom(24))
+JWT_TOKEN_SECRET = env("JWT_TOKEN_SECRET")
 
 USER_DATABASE_URL = env("USER_DATABASE_URL")
 ADMIN_USER_USERNAME = env("ADMIN_USERNAME", "admin")
@@ -73,12 +74,6 @@ app.add_middleware(
 # Exception Handlers
 
 
-@app.exception_handler(APIException)
-async def api_exception_handler(exc: APIException):
-    """Handle custom API exception"""
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
-
-
 @app.exception_handler(VerifyException)
 async def redirect_or_exception_handler(request: Request, exc: VerifyException):
     """Handle redirect or exception"""
@@ -86,7 +81,7 @@ async def redirect_or_exception_handler(request: Request, exc: VerifyException):
     host = request.headers.get("X-Forwarded-Host", "")
 
     if "/api/" in uri:
-        raise APIException(exc.message)
+        raise HTTPException(status_code=401, detail=exc.message)
 
     redirect_url = (
         "http://"
@@ -148,7 +143,7 @@ async def verify_token(
     """Verify that the client provides a valid token"""
     user, message = user_tuple
     if not user:
-        raise APIException(401, message)
+        raise HTTPException(status_code=401, detail=message)
 
 
 async def verify_token_admin(
@@ -158,9 +153,9 @@ async def verify_token_admin(
     user is an administrator"""
     user, message = user_tuple
     if not user:
-        raise APIException(401, message)
+        raise HTTPException(status_code=401, detail=message)
     if not user.admin:
-        raise APIException(401, "Unauthorized access")
+        raise HTTPException(status_code=401, detail="Unauthorized access")
 
 
 @app.on_event("startup")
@@ -284,7 +279,7 @@ async def get_user_from_claims(claims: Dict) -> models.User:
     Returns:
         User: A user instance
     """
-    username = claims.get("sub")
+    username = claims.get("username")
     query = models.users.select().where(models.User.username == username)
     return models.User.from_record(await database.fetch_one(query))
 
@@ -390,7 +385,6 @@ async def verify_request(
 
     # Limit access to non-administrators
     if "admin" in uri and not user.admin:
-        print(f"The user {user.admin}")
         raise VerifyException("Unauthorized access")
 
     # Access Control List checks
@@ -414,40 +408,46 @@ async def verify_request(
     return JSONResponse(status_code=200, content={"success": True})
 
 
-# @app.get("/verify_emqx")
-# async def verify_emqx(
-#     username: str,
-#     topic: str,
-# ):
-#     """Authenticate and authorize a request according to EMQX HTTP ACL plugin"""
-#     query = models.users.select().where(models.User.username == username)
-#     record = await database.fetch_one(query)
-#     if not record:
-#         raise HTTPException(403, "Access not allowed")
+@app.get("/verify_emqx")
+async def verify_emqx(
+    username: str,
+    topic: str,
+):
+    """Authenticate and authorize a request according to EMQX HTTP ACL plugin"""
 
-#     user = models.User.from_record(record)
+    query = models.users.select().where(models.User.username == username)
+    record = await database.fetch_one(query)
 
-#     # ACL checks
-#     if patterns := user.topic_whitelist:
-#         accepted = False
-#         for pattern in patterns:
-#             if mqtt_match(pattern, topic):
-#                 accepted = True
+    if not record:
+        # Check if the username is a JWT token, if so, retrieve username
 
-#         if not accepted:
-#             raise HTTPException(403, f"Access is not allowed to {topic}")
+        claims = jwt.decode(username, JWT_TOKEN_SECRET, algorithms=["HS256"])
+        if "sub" not in claims:
+            raise HTTPException(401, "Unauthorized")
+        query = models.users.select().where(models.User.username == claims["sub"])
+        record = await database.fetch_one(query)
+        if not record:
+            raise HTTPException(401, "Unauthorized")
 
-#     if patterns := user.topic_blacklist:
-#         accepted = True
-#         for pattern in patterns:
-#             if mqtt_match(pattern, topic):
-#                 accepted = False
+    user = models.User.from_record(record)
 
-#         if not accepted:
-#             raise HTTPException(403, f"Access is not allowed to {topic}")
-
-#     # Accepted!
-#     return JSONResponse("Authorized")
+    # ACL checks
+    if patterns := user.topic_whitelist:
+        accepted = False
+        for pattern in patterns.split(","):
+            if mqtt_match(pattern, topic):
+                accepted = True
+        if not accepted:
+            raise HTTPException(403, f"Access is not allowed to {topic}")
+    if patterns := user.topic_blacklist:
+        accepted = True
+        for pattern in patterns.split(","):
+            if mqtt_match(pattern, topic):
+                accepted = False
+        if not accepted:
+            raise HTTPException(403, f"Access is not allowed to {topic}")
+    # Accepted!
+    return JSONResponse("Authorized")
 
 
 @app.get(
@@ -482,7 +482,7 @@ async def get_user_by_id(idx: int):
             await database.fetch_one(models.users.select().where(models.User.id == idx))
         )
     except Exception as exc:
-        raise APIException(406, str(exc)) from exc
+        raise HTTPException(status_code=406, detail=str(exc)) from exc
 
 
 @app.post(
@@ -492,16 +492,14 @@ async def get_user_by_id(idx: int):
 async def create_user(user: schemas.CreateUser):
     """Create user"""
     hashed_password = pwd_context.hash(user.password)
-    print("Create user")
-    print(user)
-    print(user.path_whitelist)
+
     try:
         await database.execute(
             models.users.insert().values(
                 username=user.username.lower(),
                 firstname=user.firstname,
                 lastname=user.lastname,
-                email=user.lastname,
+                email=user.email,
                 admin=user.admin,
                 hashed_password=hashed_password,
                 path_whitelist=user.path_whitelist,
@@ -512,13 +510,14 @@ async def create_user(user: schemas.CreateUser):
         )
         return JSONResponse(status_code=200, content={"success": True})
     except Exception as exc:
-        raise APIException(
-            406, f"User with username '{user.username.lower()}' already exists"
+        raise HTTPException(
+            status_code=406,
+            detail=f"User with username '{user.username.lower()}' already exists",
         ) from exc
 
 
 @app.put(
-    "/users/{id}",
+    "/users/{idx}",
     response_model=schemas.UserOut,
     dependencies=[Depends(verify_token_admin)],
 )
@@ -539,6 +538,7 @@ async def modify_user(idx: int, modifications: schemas.ModifyUser):
     ]:
         if key in mods:
             if not validate_paths_text_string(mods[key]):
+
                 raise HTTPException(status_code=422, detail=f"Invalid value for {key}")
 
     # Update user in the database
@@ -547,7 +547,10 @@ async def modify_user(idx: int, modifications: schemas.ModifyUser):
             models.users.update().where(models.User.id == idx).values(**mods)
         )
     except Exception as exc:
-        raise APIException(406, f"User with id '{idx}' does not exist") from exc
+
+        raise HTTPException(
+            status_code=406, detail=f"User with id '{idx}' does not exist"
+        ) from exc
 
     # Success
     return models.User.from_record(
@@ -571,4 +574,6 @@ async def delete_user(idx: int):
         await database.execute(models.users.delete().where(models.User.id == idx))
         return JSONResponse(status_code=200, content={"detail": "success"})
     except Exception as exc:
-        raise APIException(406, f"User with id '{idx}' does not exist") from exc
+        raise HTTPException(
+            status_code=406, detail=f"User with id '{idx}' does not exist"
+        ) from exc
