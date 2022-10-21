@@ -60,15 +60,16 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 database = Database(USER_DATABASE_URL)
 
 
-# Allows CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["x-total-count"],
-)
+# Allows CORS if localhost
+if ACCESS_COOKIE_DOMAIN == "localhost":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["x-total-count"],
+    )
 
 
 # Exception Handlers
