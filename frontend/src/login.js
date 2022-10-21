@@ -19,8 +19,10 @@ import { ReactComponent as CrowsnestLogo } from './crowsnest-logo.svg';
 
 import { useLogin } from 'react-admin';
 
+const protocol = window.location.hostname === 'localhost' ? 'http://' : 'https://'
+
 export async function login ({username, password}) {
-    const protocol = window.location.hostname === 'localhost' ? 'http://' : 'https://'
+    
     const request = new Request(protocol + window.location.hostname + '/auth/api/login', {
         method: 'POST',
         credentials: 'include',
@@ -43,7 +45,7 @@ function LoginPrompt({admin}) {
         password: '',
         showPassword: false,
         disableButton: false,
-        redirectUrl: "http://" + window.location.hostname + "/auth",
+        redirectUrl: protocol + window.location.hostname + "/auth",
         redirectMessage: '',
         logged: false,
         admin: false, 
@@ -92,7 +94,7 @@ function LoginPrompt({admin}) {
     }, [state, admin, enqueueSnackbar, reactAdminLogin])
 
     const handleLogout = async() => {
-        fetch('http://' +  window.location.hostname + '/auth/api/logout',{method: 'POST'}).then(response => {
+        fetch(protocol +  window.location.hostname + '/auth/api/logout',{method: 'POST'}).then(response => {
             if (response.ok) {
                 setState({...state, logged: false})
             } else {
@@ -120,7 +122,7 @@ function LoginPrompt({admin}) {
 
     // Determine if already logged in
     React.useEffect(() => {
-        fetch('http://' +  window.location.hostname + '/auth/api/me',{credentials:'include',headers:{'Accept': 'application/json'}}).then(
+        fetch(protocol +  window.location.hostname + '/auth/api/me',{credentials:'include',headers:{'Accept': 'application/json'}}).then(
             response => {
                 if (!response.ok) {
                     setState(s => ({...s, logged: false}))
