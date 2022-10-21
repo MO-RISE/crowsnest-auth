@@ -20,7 +20,8 @@ import { ReactComponent as CrowsnestLogo } from './crowsnest-logo.svg';
 import { useLogin } from 'react-admin';
 
 export async function login ({username, password}) {
-    const request = new Request('http://' + window.location.hostname + '/auth/api/login', {
+    const protocol = window.location.hostname === 'localhost' ? 'http://' : 'https://'
+    const request = new Request(protocol + window.location.hostname + '/auth/api/login', {
         method: 'POST',
         credentials: 'include',
         body: "username="+username+"&password="+password+"&grant_type=password",
